@@ -19,7 +19,6 @@
         }
 
         .block {
-            margin-bottom: 20px;
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 5px;
@@ -102,17 +101,43 @@
             display: none;
         }
 
+        .formula-block {
+            flex: 1;
+            /* tự chiếm phần còn lại */
+        }
+
+        .mouse-effect-no-select {
+            user-select: none;
+            /* chuẩn */
+            -webkit-user-select: none;
+            /* Safari/Chrome */
+            -ms-user-select: none;
+            /* IE/Edge cũ */
+        }
+
         /* Khi xoay ngang (chiều rộng > chiều cao) thì đổi layout ngang */
         /* Mobile thường có pointer: coarse (ngón tay), còn PC là fine (chuột) */
-        @media (orientation: landscape) {
+        @media (orientation: landscape) and (pointer: coarse) {
             .container {
+                display: flex;
                 flex-direction: row;
-                align-items: flex-start;
+                height: 100%;
+                gap: 0px;
             }
 
-            .block {
-                flex: 1;
-                max-width: 50%;
+            .divider {
+                width: 30px;
+                cursor: col-resize;
+                background: #ddd;
+            }
+
+            .divider:hover {
+                background: #aaa;
+            }
+
+            .param-block {
+                min-width: 30%;
+                max-width: 60%;
             }
         }
     </style>
@@ -126,13 +151,14 @@
         <label for="importFile" class="menu-btn">📂 Import</label>
         <input type="file" id="importFile" accept=".json" onchange="importData(this)">
     </div>
-    <div class="container">
+    <div class="container" id="mainContainer">
         <!-- Thêm tham số -->
-        <div class="block">
+        <div class="block param-block" id="paramContainer">
             <h3 onclick="toggleBlock('paramBlock')" style="cursor:pointer;">
                 ➕ Thêm tham số
             </h3>
-            <div id="paramBlock" style="display:none; margin-top:10px;">
+
+            <div id="paramBlock">
                 <label>Tên param:</label>
                 <input type="text" id="paramName" placeholder="Ví dụ: A">
                 <label>Mô tả:</label>
@@ -144,8 +170,9 @@
             </div>
         </div>
 
+        <div class="divider" id="divider"></div>
         <!-- Thêm công thức -->
-        <div class="block">
+        <div class="block formula-block" id="formulaContainer">
             <h3>Thêm công thức</h3>
             <label>Tên công thức:</label>
             <input type="text" id="formulaName" placeholder="Ví dụ: Doanh thu">
@@ -161,6 +188,61 @@
     </div>
 
     <script>
+        //#region Xử lý layout divider
+        const divider = document.getElementById("divider");
+        const mainContainer = document.getElementById("mainContainer");
+        const paramContainer = document.getElementById("paramContainer");
+
+        let isResizing = false;
+
+        divider.addEventListener("mousedown", startResize);
+        divider.addEventListener("touchstart", startResize, { passive: false });
+
+        function startResize(e) {
+            isResizing = true;
+            document.body.classList.add("mouse-effect-no-select");
+            document.addEventListener("mousemove", resize);
+            document.addEventListener("mouseup", stopResize);
+            document.addEventListener("touchmove", resize, { passive: false });
+            document.addEventListener("touchend", stopResize);
+        }
+
+        function resize(e) {
+            if (!isResizing) return;
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+
+            // Tính tọa độ X tương đối trong container
+            const rect = mainContainer.getBoundingClientRect();
+            const dividerWidth = divider.getBoundingClientRect().width;
+            let x = clientX - rect.left;               // px từ mép trái container
+            let newWidth = ((x - dividerWidth / 2) / rect.width) * 100;     // đổi sang %
+
+            // Giới hạn min–max
+            const MIN_PCT = 30, MAX_PCT = 60;
+            if (newWidth < MIN_PCT) newWidth = MIN_PCT;
+            if (newWidth > MAX_PCT) newWidth = MAX_PCT;
+
+            // Set flex-basis để đổi chiều rộng cột trái
+            paramContainer.style.flexBasis = `${newWidth}%`;
+
+            // Ngăn scroll khi kéo trên mobile
+            if (e.cancelable) e.preventDefault();
+
+            // Debug
+            // console.log("x=", x, "rect.width=", rect.width, "newWidth%=", newWidth);
+        }
+
+        function stopResize() {
+            isResizing = false;
+            document.body.classList.remove("mouse-effect-no-select");
+            document.removeEventListener("mousemove", resize);
+            document.removeEventListener("mouseup", stopResize);
+            document.removeEventListener("touchmove", resize);
+            document.removeEventListener("touchend", stopResize);
+        }
+        //#endregion
+
         let params = {};          // lưu param
         let formulas = {};   // key = tên công thức, value = { raw, display }
 
