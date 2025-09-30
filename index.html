@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tool Param & Nhiều Công Thức</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 700px;
+            margin: auto;
+        }
+
+        h2,
+        h3 {
+            text-align: center;
+        }
+
+        .block {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .scroll-box {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 5px;
+            margin-top: 10px;
+            border-radius: 4px;
+            background: #fafafa;
+        }
+
+        label {
+            display: block;
+            margin-top: 5px;
+        }
+
+        input {
+            padding: 5px;
+            margin: 3px 0;
+        }
+
+        button {
+            margin-top: 10px;
+            padding: 6px 12px;
+        }
+
+        .param-item,
+        .formula-item {
+            margin: 5px 0;
+        }
+
+        .formula-result {
+            font-weight: bold;
+            color: darkblue;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* Khi xoay ngang (chiều rộng > chiều cao) thì đổi layout ngang */
+        /* Mobile thường có pointer: coarse (ngón tay), còn PC là fine (chuột) */
+        @media (orientation: landscape) and (pointer: coarse) {
+            .container {
+                flex-direction: row;
+                align-items: flex-start;
+            }
+
+            .block {
+                flex: 1;
+                max-width: 50%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Tool Định Nghĩa Param & Nhiều Công Thức</h2>
+
+    <div class="container">
+        <!-- Thêm tham số -->
+        <div class="block">
+            <h3 onclick="toggleBlock('paramBlock')" style="cursor:pointer;">
+                ➕ Thêm tham số
+            </h3>
+            <div id="paramBlock" style="display:none; margin-top:10px;">
+                <label>Tên param:</label>
+                <input type="text" id="paramName" placeholder="Ví dụ: A">
+                <label>Giá trị:</label>
+                <input type="number" id="paramValue" placeholder="Ví dụ: 10">
+                <button onclick="addParam()">Thêm tham số</button>
+                <div id="params" class="scroll-box"></div>
+            </div>
+        </div>
+
+        <!-- Thêm công thức -->
+        <div class="block">
+            <h3>Thêm công thức</h3>
+            <label>Tên công thức:</label>
+            <input type="text" id="formulaName" placeholder="Ví dụ: Doanh thu">
+
+            <label>Công thức:</label>
+            <input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2">
+            <button onclick="addFormula()">Thêm công thức</button>
+            <div id="formulas" class="scroll-box"></div>
+        </div>
+    </div>
+
+    <script>
+        let params = {};          // lưu param
+        let formulas = {};   // key = tên công thức, value = { raw, display }
+
+        function toggleBlock(id) {
+            const el = document.getElementById(id);
+            const title = el.previousElementSibling; // h3
+            if (el.style.display === "none") {
+                el.style.display = "block";
+                title.innerText = title.innerText.replace("➕", "➖");
+            } else {
+                el.style.display = "none";
+                title.innerText = title.innerText.replace("➖", "➕");
+            }
+        }
+
+        function deleteParam(key) {
+            delete params[key];
+            renderParams();
+            updateResults();
+        }
+        // Hàm thêm tham số
+        function addParam() {
+            const name = document.getElementById("paramName").value.trim();
+            const value = parseFloat(document.getElementById("paramValue").value);
+
+            if (!name) { alert("Tên param không được rỗng!"); return; }
+            if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
+
+            params[name] = value;
+            renderParams();
+            updateResults();
+        }
+
+        // Render danh sách param với input để chỉnh sửa realtime
+        function renderParams() {
+            let html = "<h4>Danh sách tham số:</h4>";
+            for (let key in params) {
+                html += `
+      <div class="param-item" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          ${key} = 
+          <input type="number" value="${params[key]}" 
+            onchange="updateParam('${key}', this.value)">
+        </div>
+        <button onclick="deleteParam('${key}')">❌</button>
+      </div>`;
+            }
+            document.getElementById("params").innerHTML = html;
+        }
+
+        // Cập nhật giá trị param
+        function updateParam(key, value) {
+            params[key] = parseFloat(value) || 0;
+            updateResults();
+        }
+
+        // Format công thức: thêm khoảng trắng và đổi * thành ×
+        function formatFormulaDisplay(formula) {
+            return formula
+                .replace(/\*/g, "×")              // đổi dấu nhân
+                .replace(/\//g, "÷")              // có thể đổi dấu chia
+                .replace(/([\+\-\×÷])/g, " $1 ")  // thêm khoảng trắng quanh toán tử
+                .replace(/\s+/g, " ")             // gộp nhiều khoảng trắng thành 1
+                .trim();
+        }
+
+        function deleteFormula(name) {
+            delete formulas[name];
+            renderFormulas();
+            updateResults();
+        }
+        // Thêm công thức
+        function addFormula() {
+            const name = document.getElementById("formulaName").value.trim() || `C${Object.keys(formulas).length + 1}`;
+            const formula = document.getElementById("formulaInput").value.trim();
+            if (!formula) { alert("Chưa nhập công thức!"); return; }
+
+            // Không cho trùng tên
+            if (formulas[name]) {
+                alert("Tên công thức đã tồn tại: " + name);
+                return;
+            }
+
+            // ✅ Danh sách biến hợp lệ = params + tên công thức đã có
+            let validVars = { ...params, ...formulas };
+            let tokens = formula.match(/[a-zA-Z_]\w*/g) || [];
+            let missing = tokens.filter(t => !(t in validVars));
+            if (missing.length > 0) {
+                alert("Công thức chứa biến chưa được tạo: " + missing.join(", "));
+                return;
+            }
+
+            formulas[name] = {
+                raw: formula,
+                display: formatFormulaDisplay(formula)
+            };
+
+            renderFormulas();
+            updateResults();
+
+            document.getElementById("formulaName").value = "";
+            document.getElementById("formulaInput").value = "";
+        }
+
+        // Render danh sách công thức
+        function renderFormulas() {
+            let html = "<h4>Danh sách công thức:</h4>";
+            for (let [name, f] of Object.entries(formulas)) {
+                html += `
+      <div class="formula-item" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <span><b>${name}</b>: <span id="formulaDisplay_${name}">${f.display}</span></span>
+          <span id="formulaResult_${name}" class="formula-result"></span>
+        </div>
+        <button onclick="deleteFormula('${name}')">❌</button>
+      </div>`;
+            }
+            document.getElementById("formulas").innerHTML = html;
+        }
+
+        // Tính toán lại tất cả công thức
+        function updateResults() {
+            let scope = { ...params };
+
+            for (let [name, f] of Object.entries(formulas)) {
+                try {
+                    let keys = Object.keys(scope);
+                    let values = Object.values(scope);
+                    let func = new Function(...keys, `return ${f.raw};`);
+                    let result = func(...values);
+
+                    scope[name] = result;
+                    document.getElementById("formulaResult_" + name).innerText = " = " + result;
+
+                    // reset công thức về display gốc khi tính thành công
+                    document.getElementById("formulaDisplay_" + name).innerHTML = f.display;
+
+                } catch (e) {
+                    // Lấy biến chưa có trong scope
+                    let tokens = f.raw.match(/[a-zA-Z_]\w*/g) || [];
+                    let missing = tokens.filter(t => !(t in scope));
+
+                    if (missing.length > 0) {
+                        // highlight đỏ trong display
+                        let highlighted = f.display.replace(
+                            new RegExp("\\b(" + missing.join("|") + ")\\b", "g"),
+                            '<span style="color:red;font-weight:bold;">$1</span>'
+                        );
+                        document.getElementById("formulaDisplay_" + name).innerHTML = highlighted;
+
+                        document.getElementById("formulaResult_" + name).innerText =
+                            " (Thiếu: " + missing.join(", ") + ")";
+                    } else if (/Unexpected/.test(e.message)) {
+                        document.getElementById("formulaResult_" + name).innerText = " (Lỗi cú pháp)";
+                    } else {
+                        document.getElementById("formulaResult_" + name).innerText = " (Lỗi: " + e.message + ")";
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>
