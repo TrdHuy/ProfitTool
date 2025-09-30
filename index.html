@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Tool Param & Nhiều Công Thức</title>
+    <title>Param Editor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
@@ -66,9 +66,45 @@
             gap: 15px;
         }
 
+        .menubar {
+            display: flex;
+            gap: 10px;
+            background: #f0f0f0;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        /* Style nút */
+        .menubar button,
+        .menubar .menu-btn {
+            margin: 2px;
+            background: #ffffff;
+            border: 1px solid #bbb;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        /* Hover effect */
+        .menubar button:hover,
+        .menubar .menu-btn:hover {
+            background: #e6f0ff;
+            box-shadow: 0 0 3px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Ẩn input file thật, chỉ show label giả nút */
+        #importFile {
+            display: none;
+        }
+
         /* Khi xoay ngang (chiều rộng > chiều cao) thì đổi layout ngang */
         /* Mobile thường có pointer: coarse (ngón tay), còn PC là fine (chuột) */
-        @media (orientation: landscape) and (pointer: coarse) {
+        @media (orientation: landscape) {
             .container {
                 flex-direction: row;
                 align-items: flex-start;
@@ -83,8 +119,13 @@
 </head>
 
 <body>
-    <h2>Tool Định Nghĩa Param & Nhiều Công Thức</h2>
+    <h2>Param Editor</h2>
+    <div class="menubar">
+        <button onclick="exportData()">💾 Export</button>
 
+        <label for="importFile" class="menu-btn">📂 Import</label>
+        <input type="file" id="importFile" accept=".json" onchange="importData(this)">
+    </div>
     <div class="container">
         <!-- Thêm tham số -->
         <div class="block">
@@ -94,6 +135,8 @@
             <div id="paramBlock" style="display:none; margin-top:10px;">
                 <label>Tên param:</label>
                 <input type="text" id="paramName" placeholder="Ví dụ: A">
+                <label>Mô tả:</label>
+                <input type="text" id="paramDesc" placeholder="Ví dụ: số lượng máy">
                 <label>Giá trị:</label>
                 <input type="number" id="paramValue" placeholder="Ví dụ: 10">
                 <button onclick="addParam()">Thêm tham số</button>
@@ -106,17 +149,63 @@
             <h3>Thêm công thức</h3>
             <label>Tên công thức:</label>
             <input type="text" id="formulaName" placeholder="Ví dụ: Doanh thu">
-
+            <label>Mô tả:</label>
+            <input type="text" id="formulaDesc" placeholder="Ví dụ: doanh thu hàng tháng">
             <label>Công thức:</label>
             <input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2">
             <button onclick="addFormula()">Thêm công thức</button>
             <div id="formulas" class="scroll-box"></div>
         </div>
+
+
     </div>
 
     <script>
         let params = {};          // lưu param
         let formulas = {};   // key = tên công thức, value = { raw, display }
+
+        function exportData() {
+            // Hỏi tên file
+            let filename = prompt("Nhập tên file để lưu:", "pt-data");
+            if (filename === null) return; // user bấm Cancel
+            filename = filename.trim() || "pt-data"; // nếu bỏ trống thì lấy mặc định
+
+            // Gom dữ liệu
+            const data = {
+                params: params,
+                formulas: formulas
+            };
+
+            // Tạo file JSON
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename.endsWith(".json") ? filename : filename + ".json";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importData(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    params = data.params || {};
+                    formulas = data.formulas || {};
+                    renderParams();
+                    renderFormulas();
+                    updateResults();
+                    alert("Import dữ liệu thành công!");
+                } catch (err) {
+                    alert("File không hợp lệ: " + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
 
         function toggleBlock(id) {
             const el = document.getElementById(id);
@@ -139,25 +228,33 @@
         function addParam() {
             const name = document.getElementById("paramName").value.trim();
             const value = parseFloat(document.getElementById("paramValue").value);
+            const desc = document.getElementById("paramDesc").value.trim();
 
             if (!name) { alert("Tên param không được rỗng!"); return; }
             if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
 
-            params[name] = value;
+            params[name] = { value: value, desc: desc };
+
             renderParams();
             updateResults();
+
+            // reset input
+            document.getElementById("paramName").value = "";
+            document.getElementById("paramValue").value = "";
+            document.getElementById("paramDesc").value = "";
         }
 
         // Render danh sách param với input để chỉnh sửa realtime
         function renderParams() {
             let html = "<h4>Danh sách tham số:</h4>";
             for (let key in params) {
+                let p = params[key];
                 html += `
       <div class="param-item" style="display:flex; justify-content:space-between; align-items:center;">
         <div>
           ${key} = 
-          <input type="number" value="${params[key]}" 
-            onchange="updateParam('${key}', this.value)">
+          <input type="number" value="${p.value}" onchange="updateParam('${key}', this.value)">
+          <div style="font-size:12px; color:#666;">${p.desc || ""}</div>
         </div>
         <button onclick="deleteParam('${key}')">❌</button>
       </div>`;
@@ -167,8 +264,10 @@
 
         // Cập nhật giá trị param
         function updateParam(key, value) {
-            params[key] = parseFloat(value) || 0;
-            updateResults();
+            if (params[key]) {
+                params[key].value = parseFloat(value) || 0;
+                updateResults();
+            }
         }
 
         // Format công thức: thêm khoảng trắng và đổi * thành ×
@@ -190,16 +289,16 @@
         function addFormula() {
             const name = document.getElementById("formulaName").value.trim() || `C${Object.keys(formulas).length + 1}`;
             const formula = document.getElementById("formulaInput").value.trim();
+            const desc = document.getElementById("formulaDesc").value.trim();
             if (!formula) { alert("Chưa nhập công thức!"); return; }
 
-            // Không cho trùng tên
             if (formulas[name]) {
                 alert("Tên công thức đã tồn tại: " + name);
                 return;
             }
 
-            // ✅ Danh sách biến hợp lệ = params + tên công thức đã có
-            let validVars = { ...params, ...formulas };
+            // ✅ kiểm tra biến hợp lệ
+            let validVars = { ...Object.fromEntries(Object.keys(params).map(k => [k, true])), ...formulas };
             let tokens = formula.match(/[a-zA-Z_]\w*/g) || [];
             let missing = tokens.filter(t => !(t in validVars));
             if (missing.length > 0) {
@@ -209,14 +308,17 @@
 
             formulas[name] = {
                 raw: formula,
-                display: formatFormulaDisplay(formula)
+                display: formatFormulaDisplay(formula),
+                desc: desc
             };
 
             renderFormulas();
             updateResults();
 
+            // reset
             document.getElementById("formulaName").value = "";
             document.getElementById("formulaInput").value = "";
+            document.getElementById("formulaDesc").value = "";
         }
 
         // Render danh sách công thức
@@ -228,13 +330,13 @@
         <div>
           <span><b>${name}</b>: <span id="formulaDisplay_${name}">${f.display}</span></span>
           <span id="formulaResult_${name}" class="formula-result"></span>
+          <div style="font-size:12px; color:#666;">${f.desc || ""}</div>
         </div>
         <button onclick="deleteFormula('${name}')">❌</button>
       </div>`;
             }
             document.getElementById("formulas").innerHTML = html;
         }
-
         // Tính toán lại tất cả công thức
         function updateResults() {
             let scope = { ...params };
