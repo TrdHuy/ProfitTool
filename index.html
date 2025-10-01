@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <html lang="vi">
-
 <head>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+
     <meta charset="UTF-8">
     <title>Param Editor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Inter', 'Roboto', sans-serif;
+            font-size: 14px;
+            color: #333;
             padding: 20px;
             max-width: 700px;
             margin: auto;
@@ -58,6 +62,19 @@
             font-weight: bold;
             color: darkblue;
         }
+
+        .group-header {
+            background: #eee;
+            padding: 5px;
+            margin-top: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .group-header:hover {
+            background: #ddd;
+        }
+
 
         .container {
             display: flex;
@@ -126,7 +143,7 @@
             }
 
             .divider {
-                width: 30px;
+                width: 10px;
                 cursor: col-resize;
                 background: #ddd;
             }
@@ -165,9 +182,16 @@
                 <input type="text" id="paramDesc" placeholder="Ví dụ: số lượng máy">
                 <label>Giá trị:</label>
                 <input type="number" id="paramValue" placeholder="Ví dụ: 10">
+                <label>Group:</label>
+                <input type="text" id="paramGroup" placeholder="Ví dụ: Nhân sự">
+
+                <label>Màu nền:</label>
+                <input type="color" id="paramColor" value="#f0f0f0">
+
                 <button onclick="addParam()" id="addParamButton">Thêm tham số</button>
-                <div id="params" class="scroll-box"></div>
             </div>
+            <div id="params" class="scroll-box"></div>
+
         </div>
 
         <div class="divider" id="divider"></div>
@@ -188,6 +212,49 @@
     </div>
 
     <script>
+        //#region View function
+        function exportData() {
+            // Hỏi tên file
+            let filename = prompt("Nhập tên file để lưu:", "pt-data");
+            if (filename === null) return; // user bấm Cancel
+            filename = filename.trim() || "pt-data"; // nếu bỏ trống thì lấy mặc định
+
+            // Gom dữ liệu
+            const data = {
+                params: params,
+                formulas: formulas
+            };
+            saveToLocal(data)
+            // Tạo file JSON
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename.endsWith(".json") ? filename : filename + ".json";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importData(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    params = data.params || {};
+                    formulas = data.formulas || {};
+                    renderParams();
+                    renderFormulas();
+                    updateResults();
+                    alert("Import dữ liệu thành công!");
+                } catch (err) {
+                    alert("File không hợp lệ: " + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
         //#region Xử lý layout divider
         const divider = document.getElementById("divider");
         const mainContainer = document.getElementById("mainContainer");
@@ -243,6 +310,8 @@
         }
         //#endregion
 
+        //#endregion
+
         //#region Param
         let params = {};          // lưu param
         let editingParamName = null;
@@ -254,6 +323,8 @@
             // Fill input
             document.getElementById("paramName").value = name;
             document.getElementById("paramValue").value = p.value;
+            document.getElementById("paramGroup").value = p.group;
+            document.getElementById("paramColor").value = p.color;
             document.getElementById("paramDesc").value = p.desc || "";
             document.getElementById("addParamButton").innerHTML = "Cập nhật";
             editingParamName = name; // đánh dấu đang edit
@@ -263,71 +334,31 @@
             const name = document.getElementById("paramName").value.trim();
             const value = parseFloat(document.getElementById("paramValue").value);
             const desc = document.getElementById("paramDesc").value.trim();
+            const group = document.getElementById("paramGroup").value.trim();
+            const color = document.getElementById("paramColor").value;
 
             if (!name) { alert("Tên param không được rỗng!"); return; }
             if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
 
-            // Nếu đang edit → update
             if (editingParamName) {
                 delete params[editingParamName];
-                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
                 editingParamName = null;
             }
 
-            params[name] = { value: value, desc: desc };
+            params[name] = { value, desc, group, color };
 
             renderParams();
             updateResults();
+            saveToLocal();
 
             // reset input
             document.getElementById("paramName").value = "";
             document.getElementById("paramValue").value = "";
             document.getElementById("paramDesc").value = "";
+            document.getElementById("paramGroup").value = "";
+            document.getElementById("paramColor").value = "#f0f0f0";
         }
 
-
-        function exportData() {
-            // Hỏi tên file
-            let filename = prompt("Nhập tên file để lưu:", "pt-data");
-            if (filename === null) return; // user bấm Cancel
-            filename = filename.trim() || "pt-data"; // nếu bỏ trống thì lấy mặc định
-
-            // Gom dữ liệu
-            const data = {
-                params: params,
-                formulas: formulas
-            };
-
-            // Tạo file JSON
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = filename.endsWith(".json") ? filename : filename + ".json";
-            a.click();
-            URL.revokeObjectURL(url);
-        }
-
-        function importData(input) {
-            const file = input.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    params = data.params || {};
-                    formulas = data.formulas || {};
-                    renderParams();
-                    renderFormulas();
-                    updateResults();
-                    alert("Import dữ liệu thành công!");
-                } catch (err) {
-                    alert("File không hợp lệ: " + err.message);
-                }
-            };
-            reader.readAsText(file);
-        }
 
         function toggleBlock(id) {
             const el = document.getElementById(id);
@@ -348,24 +379,55 @@
         }
 
         // Render danh sách param với input để chỉnh sửa realtime
+        let groupState = {}; // Lưu trạng thái expand/collapse của từng group
+
         function renderParams() {
-            let html = "<h4>Danh sách tham số:</h4>";
+            // Gom param theo group
+            let grouped = {};
             for (let key in params) {
                 let p = params[key];
-                html += `
-      <div class="param-item" style="display:flex; justify-content:space-between; align-items:center;">
-        <div>
-          ${key} = 
-          <input type="number" value="${p.value}" onchange="updateParam('${key}', this.value)">
-          <div style="font-size:12px; color:#666;">${p.desc || ""}</div>
-        </div>
-        <div>
-          <button onclick="editParam('${key}')">✏️</button>
-          <button onclick="deleteParam('${key}')">❌</button>
-        </div>
-      </div>`;
+                let g = p.group || "Ungrouped";
+                if (!grouped[g]) grouped[g] = [];
+                grouped[g].push({ name: key, ...p });
             }
+
+            let html = "<h4>Danh sách tham số:</h4>";
+
+            for (let g in grouped) {
+                if (!(g in groupState)) groupState[g] = true; // mặc định expand
+
+                html += `
+      <div class="param-group">
+        <div class="group-header" onclick="toggleGroup('${g}')">
+          ${groupState[g] ? "▼" : "▶"} <b>${g}</b>
+        </div>
+        <div id="group-${g}" style="display:${groupState[g] ? "block" : "none"}; margin-left:15px;">
+    `;
+
+                grouped[g].forEach(p => {
+                    html += `
+        <div class="param-item" style="display:flex; justify-content:space-between; align-items:center; background:${p.color || "#fafafa"}; padding:5px; border-radius:4px; margin:3px 0;">
+          <div>
+            ${p.name} = 
+            <input type="number" value="${p.value}" onchange="updateParam('${p.name}', this.value)">
+            <div style="font-size:12px; color:#333;">${p.desc || ""}</div>
+          </div>
+          <div>
+            <button onclick="editParam('${p.name}')">✏️</button>
+            <button onclick="deleteParam('${p.name}')">❌</button>
+          </div>
+        </div>`;
+                });
+
+                html += `</div></div>`;
+            }
+
             document.getElementById("params").innerHTML = html;
+        }
+
+        function toggleGroup(g) {
+            groupState[g] = !groupState[g];
+            renderParams();
         }
 
         // Cập nhật giá trị param
@@ -496,6 +558,33 @@
             }
         }
         //#endregion
+
+        // Lưu local mỗi khi có thay đổi
+        function saveToLocal(data) {
+            localStorage.setItem("pt-latest-data", JSON.stringify(data));
+        }
+
+        // Load khi mở page
+        function loadFromLocal() {
+            const raw = localStorage.getItem("pt-latest-data");
+            if (!raw) return;
+            try {
+                const data = JSON.parse(raw);
+                params = data.params || {};
+                formulas = data.formulas || {};
+                renderParams();
+                renderFormulas();
+                updateResults();
+            } catch (e) {
+                console.error("Không load được dữ liệu local:", e);
+            }
+        }
+
+        // Gọi khi page khởi động
+        window.addEventListener("DOMContentLoaded", loadFromLocal);
+
+        // Chèn saveToLocal() vào cuối addParam, addFormula, deleteParam, deleteFormula
+
     </script>
 </body>
 
