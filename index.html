@@ -23,6 +23,37 @@
             text-align: center;
         }
 
+        /* #region list-item*/
+        /* Param và Formula item chung */
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px;
+            border-radius: 4px;
+            margin: 3px 0;
+            background: var(--list-item-bg, #fafafa);
+            /* default màu */
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        .list-item:hover {
+            background: #f5faff;
+        }
+
+        .list-item:active {
+            background: #dbe9ff;
+            transform: scale(0.98);
+        }
+
+        /* Khi long-press (dành cho mobile, thêm class .long-press bằng JS) */
+        .list-item.long-press {
+            background: #ffe8cc;
+            /* cam nhạt */
+        }
+
+
+        /* #endregion */
         .block {
             padding: 10px;
             border: 1px solid #ccc;
@@ -52,11 +83,6 @@
         button {
             margin-top: 10px;
             padding: 6px 12px;
-        }
-
-        .param-item,
-        .formula-item {
-            margin: 5px 0;
         }
 
         .formula-result {
@@ -216,7 +242,9 @@
 
         <label for="importFile" class="menu-btn">📂 Import</label>
         <input type="file" id="importFile" accept=".json" onchange="importData(this)">
+        <button onclick="clearWorkspace()">🧹 Clear</button>
         <button onclick="toggleFullscreen()">🔳 Toggle Fullscreen</button>
+
     </div>
     <div class="container" id="mainContainer">
         <!-- Thêm tham số -->
@@ -556,9 +584,9 @@
 
                 grouped[g].forEach(p => {
                     html += `
-        <div class="param-item" 
+        <div class="param-item list-item" 
             oncontextmenu="openContextMenu(event, 'param', '${p.name}')"
-            style="display:flex; justify-content:space-between; align-items:center; background:${p.color || "#fafafa"}; padding:5px; border-radius:4px; margin:3px 0;">
+            style="--list-item-bg:${p.color || '#fafafa'};">
           <div>
             ${p.name} = 
             <input 
@@ -667,9 +695,9 @@
             let html = "<h4>Danh sách công thức:</h4>";
             for (let [name, f] of Object.entries(formulas)) {
                 html += `
-      <div class="formula-item" 
+      <div class="formula-item list-item" 
             oncontextmenu="openContextMenu(event, 'formula', '${name}')"
-            style="display:flex; justify-content:space-between; align-items:center;">
+            style="--list-item-bg:${'#dddddd'};">
         <div>
           <span><b>${name}</b>: <span id="formulaDisplay_${name}">${f.display}</span></span>
           <span id="formulaResult_${name}" class="formula-result"></span>
@@ -760,6 +788,17 @@
         //#endregion
 
         // Lưu local mỗi khi có thay đổi
+        function clearWorkspace() {
+            if (!confirm("Bạn có chắc muốn xoá toàn bộ Param và Formula hiện tại không?")) return;
+
+            params = {};
+            formulas = {};
+            renderParams();
+            renderFormulas();
+            updateResults();
+            saveToLocal({ params, formulas }); // clear cả localStorage luôn
+        }
+
         function saveToLocal(data) {
             localStorage.setItem("pt-latest-data", JSON.stringify(data));
         }
