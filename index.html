@@ -165,7 +165,7 @@
                 <input type="text" id="paramDesc" placeholder="Ví dụ: số lượng máy">
                 <label>Giá trị:</label>
                 <input type="number" id="paramValue" placeholder="Ví dụ: 10">
-                <button onclick="addParam()">Thêm tham số</button>
+                <button onclick="addParam()" id="addParamButton">Thêm tham số</button>
                 <div id="params" class="scroll-box"></div>
             </div>
         </div>
@@ -180,7 +180,7 @@
             <input type="text" id="formulaDesc" placeholder="Ví dụ: doanh thu hàng tháng">
             <label>Công thức:</label>
             <input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2">
-            <button onclick="addFormula()">Thêm công thức</button>
+            <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
             <div id="formulas" class="scroll-box"></div>
         </div>
 
@@ -243,8 +243,48 @@
         }
         //#endregion
 
+        //#region Param
         let params = {};          // lưu param
-        let formulas = {};   // key = tên công thức, value = { raw, display }
+        let editingParamName = null;
+
+        function editParam(name) {
+            const p = params[name];
+            if (!p) return;
+
+            // Fill input
+            document.getElementById("paramName").value = name;
+            document.getElementById("paramValue").value = p.value;
+            document.getElementById("paramDesc").value = p.desc || "";
+            document.getElementById("addParamButton").innerHTML = "Cập nhật";
+            editingParamName = name; // đánh dấu đang edit
+        }
+
+        function addParam() {
+            const name = document.getElementById("paramName").value.trim();
+            const value = parseFloat(document.getElementById("paramValue").value);
+            const desc = document.getElementById("paramDesc").value.trim();
+
+            if (!name) { alert("Tên param không được rỗng!"); return; }
+            if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
+
+            // Nếu đang edit → update
+            if (editingParamName) {
+                delete params[editingParamName];
+                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+                editingParamName = null;
+            }
+
+            params[name] = { value: value, desc: desc };
+
+            renderParams();
+            updateResults();
+
+            // reset input
+            document.getElementById("paramName").value = "";
+            document.getElementById("paramValue").value = "";
+            document.getElementById("paramDesc").value = "";
+        }
+
 
         function exportData() {
             // Hỏi tên file
@@ -306,25 +346,6 @@
             renderParams();
             updateResults();
         }
-        // Hàm thêm tham số
-        function addParam() {
-            const name = document.getElementById("paramName").value.trim();
-            const value = parseFloat(document.getElementById("paramValue").value);
-            const desc = document.getElementById("paramDesc").value.trim();
-
-            if (!name) { alert("Tên param không được rỗng!"); return; }
-            if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
-
-            params[name] = { value: value, desc: desc };
-
-            renderParams();
-            updateResults();
-
-            // reset input
-            document.getElementById("paramName").value = "";
-            document.getElementById("paramValue").value = "";
-            document.getElementById("paramDesc").value = "";
-        }
 
         // Render danh sách param với input để chỉnh sửa realtime
         function renderParams() {
@@ -338,7 +359,10 @@
           <input type="number" value="${p.value}" onchange="updateParam('${key}', this.value)">
           <div style="font-size:12px; color:#666;">${p.desc || ""}</div>
         </div>
-        <button onclick="deleteParam('${key}')">❌</button>
+        <div>
+          <button onclick="editParam('${key}')">✏️</button>
+          <button onclick="deleteParam('${key}')">❌</button>
+        </div>
       </div>`;
             }
             document.getElementById("params").innerHTML = html;
@@ -351,6 +375,11 @@
                 updateResults();
             }
         }
+        //#endregion
+
+        //#region Formula
+        let formulas = {};   // key = tên công thức, value = { raw, display }
+        let editingFormulaName = null;
 
         // Format công thức: thêm khoảng trắng và đổi * thành ×
         function formatFormulaDisplay(formula) {
@@ -367,25 +396,30 @@
             renderFormulas();
             updateResults();
         }
-        // Thêm công thức
+
+        function editFormula(name) {
+            const f = formulas[name];
+            if (!f) return;
+
+            document.getElementById("formulaName").value = name;
+            document.getElementById("formulaInput").value = f.raw;
+            document.getElementById("formulaDesc").value = f.desc || "";
+
+            editingFormulaName = name;
+        }
+
         function addFormula() {
             const name = document.getElementById("formulaName").value.trim() || `C${Object.keys(formulas).length + 1}`;
             const formula = document.getElementById("formulaInput").value.trim();
             const desc = document.getElementById("formulaDesc").value.trim();
+
             if (!formula) { alert("Chưa nhập công thức!"); return; }
 
-            if (formulas[name]) {
-                alert("Tên công thức đã tồn tại: " + name);
-                return;
-            }
-
-            // ✅ kiểm tra biến hợp lệ
-            let validVars = { ...Object.fromEntries(Object.keys(params).map(k => [k, true])), ...formulas };
-            let tokens = formula.match(/[a-zA-Z_]\w*/g) || [];
-            let missing = tokens.filter(t => !(t in validVars));
-            if (missing.length > 0) {
-                alert("Công thức chứa biến chưa được tạo: " + missing.join(", "));
-                return;
+            // Nếu đang edit → xóa công thức cũ
+            if (editingFormulaName) {
+                document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
+                delete formulas[editingFormulaName];
+                editingFormulaName = null;
             }
 
             formulas[name] = {
@@ -397,7 +431,6 @@
             renderFormulas();
             updateResults();
 
-            // reset
             document.getElementById("formulaName").value = "";
             document.getElementById("formulaInput").value = "";
             document.getElementById("formulaDesc").value = "";
@@ -414,7 +447,10 @@
           <span id="formulaResult_${name}" class="formula-result"></span>
           <div style="font-size:12px; color:#666;">${f.desc || ""}</div>
         </div>
-        <button onclick="deleteFormula('${name}')">❌</button>
+        <div>
+          <button onclick="editFormula('${name}')">✏️</button>
+          <button onclick="deleteFormula('${name}')">❌</button>
+        </div>
       </div>`;
             }
             document.getElementById("formulas").innerHTML = html;
@@ -459,6 +495,7 @@
                 }
             }
         }
+        //#endregion
     </script>
 </body>
 
