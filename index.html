@@ -287,7 +287,8 @@
             <label>Tên công thức:</label>
             <auto-scroll-input type="text" id="formulaName" placeholder="Ví dụ: Doanh thu"></auto-scroll-input>
             <label>Mô tả:</label>
-            <auto-scroll-input type="text" id="formulaDesc" placeholder="Ví dụ: doanh thu hàng tháng"></auto-scroll-input>
+            <auto-scroll-input type="text" id="formulaDesc"
+                placeholder="Ví dụ: doanh thu hàng tháng"></auto-scroll-input>
             <label>Công thức:</label>
             <auto-scroll-input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2"></auto-scroll-input>
             <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
@@ -336,6 +337,73 @@
                 }
             }
         }
+
+        class FormattedInput extends AutoScrollInput {
+            connectedCallback() {
+                super.connectedCallback();
+                const input = this.querySelector("input");
+
+                const format = this.getAttribute("format") || "";
+
+                // set giá trị ban đầu (formatted)
+                if (this.hasAttribute("value")) {
+                    input.value = this.formatValue(this.getAttribute("value"), format);
+                }
+
+                // Khi focus → hiện raw value
+                input.addEventListener("focus", () => {
+                    const raw = this.getAttribute("value");
+                    if (raw !== null) input.value = raw;
+                });
+
+                // Khi blur → format lại
+                input.addEventListener("blur", () => {
+                    let val = input.value;
+                    let num = parseFloat(val.replace(/[^\d.-]/g, ""));
+                    if (isNaN(num)) num = 0;
+
+                    this.setAttribute("value", num); // update attribute để đồng bộ
+                    input.value = this.formatValue(num, format);
+
+                    // trigger sự kiện custom để cha biết có update
+                    //this.dispatchEvent(new CustomEvent("valueChanged", { detail: { key: this.id, value: num } }));
+                });
+
+                input.addEventListener("blur", () => {
+                    let val = input.value;
+                    let num = parseFloat(val.replace(/[^\d.-]/g, ""));
+                    if (isNaN(num)) num = 0;
+
+                    this.setAttribute("value", num); // update attribute để đồng bộ
+                    input.value = this.formatValue(num, format);
+
+                    // trigger sự kiện custom để cha biết có update
+                    //this.dispatchEvent(new CustomEvent("valueChanged", { detail: { key: this.id, value: num } }));
+                });
+            }
+
+            formatValue(val, format) {
+                if (val == null || isNaN(val)) return val;
+                switch (format) {
+                    case "currency":
+                        return new Intl.NumberFormat("vi-VN").format(val) + " VND";
+                    case "decimal":
+                        return new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+                    case "percent":
+                        return val + " %";
+                    default:
+                        return val;
+                }
+            }
+
+            get value() { return parseFloat(this.getAttribute("value")); }
+            set value(val) {
+                this.setAttribute("value", val);
+                const format = this.getAttribute("format") || "";
+                this.querySelector("input").value = this.formatValue(val, format);
+            }
+        }
+
 
         //#region View function
         function toggleFullscreen() {
@@ -394,7 +462,7 @@
                     formulas = data.formulas || {};
                     renderParams();
                     renderFormulas();
-                    updateResults();
+                    updateFormulaResults();
                     alert("Import dữ liệu thành công!");
                 } catch (err) {
                     alert("File không hợp lệ: " + err.message);
@@ -461,6 +529,8 @@
 
         //#region Utils
         function formatValue(val, format) {
+            console.log("formatValue");
+
             if (val == null || isNaN(val)) return val;
 
             switch (format) {
@@ -560,7 +630,7 @@
             params[name] = { value, desc, group, color, format };
 
             renderParams();
-            updateResults();
+            updateFormulaResults();
             saveToLocal({
                 params: params,
                 formulas: formulas
@@ -590,13 +660,20 @@
         function deleteParam(key) {
             delete params[key];
             renderParams();
-            updateResults();
+            updateFormulaResults();
         }
 
         // Render danh sách param với input để chỉnh sửa realtime
         let groupState = {}; // Lưu trạng thái expand/collapse của từng group
 
         function renderParams() {
+            const paramsContainer = document.getElementById("params");
+            paramsContainer.innerHTML = ""; // clear cũ
+
+            const title = document.createElement("h4");
+            title.innerText = "Danh sách tham số:";
+            paramsContainer.appendChild(title);
+
             // Gom param theo group
             let grouped = {};
             for (let key in params) {
@@ -606,51 +683,86 @@
                 grouped[g].push({ name: key, ...p });
             }
 
-            let html = "<h4>Danh sách tham số:</h4>";
-
             for (let g in grouped) {
                 if (!(g in groupState)) groupState[g] = true; // mặc định expand
 
-                html += `
-      <div class="param-group">
-        <div class="group-header" onclick="toggleGroup('${g}')">
-          ${groupState[g] ? "▼" : "▶"} <b>${g}</b>
-        </div>
-        <div id="group-${g}" style="display:${groupState[g] ? "block" : "none"}; margin-left:15px;">
-    `;
+                const groupDiv = document.createElement("div");
+                groupDiv.className = "param-group";
 
+                // header
+                const header = document.createElement("div");
+                header.className = "group-header";
+                header.innerHTML = `${groupState[g] ? "▼" : "▶"} <b>${g}</b>`;
+                header.addEventListener("click", () => toggleGroup(g));
+                groupDiv.appendChild(header);
+
+                // container
+                const groupContainer = document.createElement("div");
+                groupContainer.id = `group-${g}`;
+                groupContainer.style.display = groupState[g] ? "block" : "none";
+                groupContainer.style.marginLeft = "15px";
+                groupDiv.appendChild(groupContainer);
+
+                // từng param
                 grouped[g].forEach(p => {
-                    html += `
-        <div class="param-item list-item" 
-            oncontextmenu="openContextMenu(event, 'param', '${p.name}')"
-            style="--list-item-bg:${p.color || '#fafafa'};">
-          <div>
-            ${p.name} = 
-            <input 
-                type="text" 
-                value="${formatValue(p.value, p.format)}" 
-                onchange="updateParam('${p.name}', this.value)
-                onblur="updateParamFormatted('${p.name}', this.value)" 
-                onfocus="this.value = ${p.value}" />
-            <div style="font-size:12px; color:#333;">${p.desc || ""}</div>
-          </div>
-        </div>`;
+                    const item = document.createElement("div");
+                    item.className = "param-item list-item";
+                    item.style.setProperty("--list-item-bg", p.color || "#fafafa");
+                    item.addEventListener("contextmenu", e => openContextMenu(e, "param", p.name));
+
+                    const inner = document.createElement("div");
+
+                    // label + input
+                    const label = document.createTextNode(`${p.name} = `);
+                    inner.appendChild(label);
+
+                    const input = document.createElement("input");
+                    input.type = "text";
+                    input.value = formatValue(p.value, p.format);
+
+                    input.addEventListener("focus", () => {
+                        console.log("onFocus");
+                        input.value = p.value; // raw value
+                    });
+                    input.addEventListener("blur", () => {
+                        console.log("onBlur");
+                        updateParamFormatted(p.name, input.value);
+                    });
+                    input.addEventListener("change", () => {
+                        console.log("onChange");
+                        if (params[p.name]) {
+                            params[p.name].value = parseFloat(input.value) || 0;
+                            updateFormulaResults();
+                        }
+                    });
+
+                    inner.appendChild(input);
+
+                    // description
+                    const desc = document.createElement("div");
+                    desc.style.fontSize = "12px";
+                    desc.style.color = "#333";
+                    desc.innerText = p.desc || "";
+                    inner.appendChild(desc);
+
+                    item.appendChild(inner);
+                    groupContainer.appendChild(item);
                 });
 
-                html += `</div></div>`;
+                paramsContainer.appendChild(groupDiv);
             }
-
-            document.getElementById("params").innerHTML = html;
         }
 
+
         function updateParamFormatted(key, val) {
+            console.log("updateParamFormatted");
             // loại bỏ ký tự không phải số trước
             let num = parseFloat(val.replace(/[^\d.-]/g, ""));
             if (isNaN(num)) num = 0;
             if (params[key]) {
                 params[key].value = num;
                 renderParams();
-                updateResults();
+                updateFormulaResults();
             }
         }
 
@@ -659,13 +771,6 @@
             renderParams();
         }
 
-        // Cập nhật giá trị param
-        function updateParam(key, value) {
-            if (params[key]) {
-                params[key].value = parseFloat(value) || 0;
-                updateResults();
-            }
-        }
         //#endregion
 
         //#region Formula
@@ -685,7 +790,7 @@
         function deleteFormula(name) {
             delete formulas[name];
             renderFormulas();
-            updateResults();
+            updateFormulaResults();
         }
 
         function editFormula(name) {
@@ -720,7 +825,7 @@
             };
 
             renderFormulas();
-            updateResults();
+            updateFormulaResults();
 
             document.getElementById("formulaName").value = "";
             document.getElementById("formulaInput").value = "";
@@ -746,7 +851,7 @@
         }
 
         // Tính toán lại tất cả công thức
-        function updateResults() {
+        function updateFormulaResults() {
             let scope = {};
             // 1) Map params -> scope (lấy field value nếu là object)
             for (let [k, v] of Object.entries(params)) {
@@ -832,7 +937,7 @@
             formulas = {};
             renderParams();
             renderFormulas();
-            updateResults();
+            updateFormulaResults();
             saveToLocal({ params, formulas }); // clear cả localStorage luôn
         }
 
@@ -850,7 +955,7 @@
                 formulas = data.formulas || {};
                 renderParams();
                 renderFormulas();
-                updateResults();
+                updateFormulaResults();
             } catch (e) {
                 console.error("Không load được dữ liệu local:", e);
             }
@@ -860,6 +965,8 @@
         window.addEventListener("DOMContentLoaded", loadFromLocal);
         // Đăng ký custom tag <auto-scroll-input>
         customElements.define("auto-scroll-input", AutoScrollInput);
+        customElements.define("formatted-input", FormattedInput);
+
         // Chèn saveToLocal() vào cuối addParam, addFormula, deleteParam, deleteFormula
 
     </script>
