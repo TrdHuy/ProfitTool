@@ -255,13 +255,13 @@
 
             <div id="paramBlock">
                 <label>Tên param:</label>
-                <input type="text" id="paramName" placeholder="Ví dụ: A">
+                <auto-scroll-input type="text" id="paramName" placeholder="Ví dụ: A"></auto-scroll-input>
                 <label>Mô tả:</label>
-                <input type="text" id="paramDesc" placeholder="Ví dụ: số lượng máy">
+                <auto-scroll-input type="text" id="paramDesc" placeholder="Ví dụ: số lượng máy"></auto-scroll-input>
                 <label>Giá trị:</label>
-                <input type="number" id="paramValue" placeholder="Ví dụ: 10">
+                <auto-scroll-input type="number" id="paramValue" placeholder="Ví dụ: 10"></auto-scroll-input>
                 <label>Group:</label>
-                <input type="text" id="paramGroup" placeholder="Ví dụ: Nhân sự">
+                <auto-scroll-input type="text" id="paramGroup" placeholder="Ví dụ: Nhân sự"></auto-scroll-input>
 
                 <label>Màu nền:</label>
                 <input type="color" id="paramColor" value="#f0f0f0">
@@ -285,11 +285,11 @@
         <div class="block formula-block" id="formulaContainer">
             <h3>Thêm công thức</h3>
             <label>Tên công thức:</label>
-            <input type="text" id="formulaName" placeholder="Ví dụ: Doanh thu">
+            <auto-scroll-input type="text" id="formulaName" placeholder="Ví dụ: Doanh thu"></auto-scroll-input>
             <label>Mô tả:</label>
-            <input type="text" id="formulaDesc" placeholder="Ví dụ: doanh thu hàng tháng">
+            <auto-scroll-input type="text" id="formulaDesc" placeholder="Ví dụ: doanh thu hàng tháng"></auto-scroll-input>
             <label>Công thức:</label>
-            <input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2">
+            <auto-scroll-input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2"></auto-scroll-input>
             <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
             <div id="formulas" class="scroll-box"></div>
         </div>
@@ -300,6 +300,43 @@
     </div>
 
     <script>
+
+        const isMobile = /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+
+        class AutoScrollInput extends HTMLElement {
+            connectedCallback() {
+                // nếu trong tag chưa có input thì mới tạo
+                if (!this.querySelector("input")) {
+                    const input = document.createElement("input");
+
+                    // copy toàn bộ attribute từ custom tag xuống input
+                    Array.from(this.attributes).forEach(attr => {
+                        input.setAttribute(attr.name, attr.value);
+                    });
+
+                    // auto scroll khi focus
+                    input.addEventListener("focus", () => {
+                        if (isMobile) {
+                            setTimeout(() => {
+                                input.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }, 300);
+                        }
+                    });
+                    this.appendChild(input);
+                }
+            }
+
+            // getter/setter để dùng như <input>
+            get value() {
+                return this.querySelector("input")?.value;
+            }
+            set value(val) {
+                if (this.querySelector("input")) {
+                    this.querySelector("input").value = val;
+                }
+            }
+        }
+
         //#region View function
         function toggleFullscreen() {
             const btn = document.getElementById("fullscreenBtn");
@@ -821,7 +858,8 @@
 
         // Gọi khi page khởi động
         window.addEventListener("DOMContentLoaded", loadFromLocal);
-
+        // Đăng ký custom tag <auto-scroll-input>
+        customElements.define("auto-scroll-input", AutoScrollInput);
         // Chèn saveToLocal() vào cuối addParam, addFormula, deleteParam, deleteFormula
 
     </script>
