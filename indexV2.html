@@ -281,7 +281,7 @@
 
                 <button onclick="addParam()" id="addParamButton">Thêm tham số</button>
             </div>
-            <param-list id="paramsView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu"
+            <param-list id="paramsView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('param')"
                 ongrouptoggle="handleGroupToggle">
                 <template>
                     <div class="param-item">
@@ -310,7 +310,7 @@
             <label>Công thức:</label>
             <auto-scroll-input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2"></auto-scroll-input>
             <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
-            <param-list id="formulasView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu"
+            <param-list id="formulasView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('formula')"
                 ongrouptoggle="handleGroupToggle">
                 <template>
                     <div class="param-item">
@@ -354,6 +354,61 @@
                 if (this.children) {
                     this.children._parent = this;
                 }
+
+                const self = this;
+                const proxy = new Proxy(this, {
+                    set(target, prop, value) {
+                        const oldValue = target[prop];
+                        const changed = oldValue !== value;
+                        if (
+                            changed &&
+                            prop !== "parent" &&
+                            prop !== "children" &&
+                            typeof prop === "string"
+                        ) {
+
+                            // Nếu item có listener riêng
+                            if (self._beforeValueChangedlisteners && self._beforeValueChangedlisteners.size > 0) {
+                                self._beforeValueChangedlisteners.forEach(cb =>
+                                    value = cb({ field: prop, oldValue, newValue: value, item: proxy }) || value
+                                );
+                            }
+                        }
+                        // gán giá trị
+                        target[prop] = value;
+
+                        // nếu giá trị thay đổi và không phải internal field → phát sự kiện
+                        if (
+                            changed &&
+                            prop !== "parent" &&
+                            prop !== "children" &&
+                            typeof prop === "string"
+                        ) {
+
+                            // Nếu item có listener riêng
+                            if (self._valueChangedListeners && self._valueChangedListeners.size > 0) {
+                                self._valueChangedListeners.forEach(cb =>
+                                    cb({ field: prop, oldValue, newValue: value, item: proxy })
+                                );
+                            }
+                        }
+
+                        return true;
+                    },
+                    get(target, prop) {
+                        return target[prop];
+                    },
+                });
+                // lưu set listener riêng cho item nếu cần
+                proxy._valueChangedListeners = new Set();
+                proxy._beforeValueChangedlisteners = new Set();
+                proxy.registerListener = cb => proxy._valueChangedListeners.add(cb);
+                proxy.unregisterListener = cb => proxy._valueChangedListeners.delete(cb);
+                proxy.registerBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.add(cb);
+                proxy.unregisterBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.delete(cb);
+
+
+                return proxy;
             }
 
             toString() {
@@ -446,6 +501,26 @@
                                 const oldItem = target._items[i];
                                 target._items[i] = val;
                                 target._notifyCollection({ action: "set", oldItem, newItem: val });
+                            };
+                        }
+
+                        if (prop === "remove") {
+                            return (item) => {
+                                const index = target._items.indexOf(item);
+                                if (index === -1) return false; // không tìm thấy
+
+                                // Xóa item khỏi danh sách
+                                const removed = target._items.splice(index, 1);
+                                removed.forEach(it => (it.parent = null));
+
+                                // Gửi sự kiện thông báo
+                                target._notifyCollection({
+                                    action: "remove",
+                                    index,
+                                    items: removed
+                                });
+
+                                return true;
                             };
                         }
 
@@ -772,7 +847,6 @@
             _createItemElement(itemData) {
                 const C = ParamListView.CLASSES;
                 const T = ParamListView.TAGS;
-
                 // --- group ---
                 if (itemData.children) {
                     const groupBlock = document.createElement("div");
@@ -814,39 +888,7 @@
                 const template = this.querySelector(T.item_template);
                 const fragment = template.content.cloneNode(true);
 
-                // binding text nodes
-                const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT, null, false);
-                while (walker.nextNode()) {
-                    const node = walker.currentNode;
-                    const matches = node.textContent.match(/{{\s*([\w]+)\s*}}/g);
-                    if (matches) {
-                        matches.forEach(m => {
-                            const key = m.replace(/[{}]/g, "").trim();
-                            if (itemData[key] !== undefined) {
-                                node.textContent = node.textContent.replace(m, itemData[key]);
-                            }
-                        });
-                    }
-                }
-
-                // binding attributes
-                fragment.querySelectorAll("*").forEach(el => {
-                    for (let attr of el.attributes) {
-                        const m = attr.value.match(/{{\s*([\w]+)\s*}}/);
-                        if (m) {
-                            const key = m[1];
-                            if (itemData[key] !== undefined) {
-                                el.setAttribute(attr.name, itemData[key]);
-                                if (attr.name === "value" && el.tagName === "INPUT") {
-                                    el.value = itemData[key];
-                                    el.addEventListener("input", () => {
-                                        itemData[key] = el.value;
-                                    });
-                                }
-                            }
-                        }
-                    }
-                });
+                this._bindFragmentToItem(fragment, itemData);
 
                 const container = document.createElement("div");
                 container.appendChild(fragment);
@@ -922,22 +964,119 @@
                 });
             }
 
+            _bindFragmentToItem(fragment, itemData) {
+                const bindings = []; // danh sách liên kết { key, node, type, attrName? }
+
+                // 1️⃣ Text nodes
+                const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT, null, false);
+                while (walker.nextNode()) {
+                    const node = walker.currentNode;
+                    const matches = node.textContent.match(/{{\s*([\w]+)\s*}}/g);
+                    if (matches) {
+                        matches.forEach(m => {
+                            const key = m.replace(/[{}]/g, "").trim();
+                            if (itemData[key] !== undefined) {
+                                // render ban đầu
+                                node.textContent = node.textContent.replace(m, itemData[key]);
+                                // lưu lại binding
+                                bindings.push({ key, node, type: "text" });
+                            }
+                        });
+                    }
+                }
+
+                // 2️⃣ Attributes
+                fragment.querySelectorAll("*").forEach(el => {
+                    for (let attr of el.attributes) {
+                        const m = attr.value.match(/{{\s*([\w]+)\s*}}/);
+                        if (m) {
+                            const key = m[1];
+                            if (itemData[key] !== undefined) {
+                                // render ban đầu
+                                el.setAttribute(attr.name, itemData[key]);
+
+                                // nếu là input.value → tạo 2 chiều
+                                if (attr.name === "value" && el.tagName === "INPUT") {
+                                    el.value = itemData[key];
+                                    el.addEventListener("input", () => {
+                                        itemData[key] = el.value; // view → model
+                                    });
+                                }
+
+                                // lưu lại binding (để update khi model đổi)
+                                bindings.push({ key, node: el, type: "attr", attrName: attr.name });
+                            }
+                        }
+                    }
+                });
+
+                // 3️⃣ Khi model thay đổi → update view
+                if (typeof itemData.registerListener === "function") {
+                    itemData.registerListener(e => {
+                        const { field, newValue } = e;
+                        bindings.forEach(b => {
+                            if (b.key === field) {
+                                if (b.type === "text") {
+                                    b.node.textContent = newValue; // update text node
+                                } else if (b.type === "attr") {
+                                    b.node.setAttribute(b.attrName, newValue);
+                                    if (b.attrName === "value" && b.node.tagName === "INPUT") {
+                                        b.node.value = newValue; // model → view
+                                    }
+                                }
+                            }
+                        });
+                    });
+                }
+
+                return bindings;
+            }
+
             // ==================== EVENT BINDING ====================
 
             _emitEvent(type, detail) {
+                // Tạo bản sao detail để có thể thêm extraParam sau
+                let eventDetail = { ...detail };
+
                 const event = new CustomEvent(type, {
                     bubbles: true,
                     cancelable: true,
                     composed: true,
-                    detail
+                    detail: eventDetail
                 });
+
                 this.dispatchEvent(event);
 
-                // Gọi callback inline nếu có (ví dụ: onitemclick="...")
                 const attrName = "on" + type.toLowerCase();
                 const inlineHandler = this.rootView.getAttribute(attrName);
-                if (inlineHandler && window[inlineHandler]) {
-                    window[inlineHandler](event);
+
+                if (inlineHandler) {
+                    const match = inlineHandler.match(/^(\w+)\((.*)\)$/);
+                    if (match) {
+                        const fnName = match[1];
+                        const argsStr = match[2].trim();
+
+                        if (window[fnName]) {
+                            let extraParam = null;
+
+                            if (argsStr) {
+                                try {
+                                    extraParam = new Function(`return [${argsStr}]`)();
+                                } catch (e) {
+                                    console.warn("Failed to parse inline params:", e);
+                                }
+                            }
+
+                            // Gắn extraParam vào event.detail mà KHÔNG ghi đè event.detail
+                            event.detail.extraParam = extraParam;
+
+                            window[fnName](event);
+                        }
+                    } else {
+                        if (window[inlineHandler]) {
+                            window[inlineHandler](event);
+                        }
+                    }
                 }
             }
 
@@ -1061,14 +1200,13 @@
             }
         }
     </script>
-    <script>
+    <script des="app">
         // Đăng ký custom tag <auto-scroll-input>
         customElements.define("auto-scroll-input", AutoScrollInput);
         customElements.define("formatted-input", FormattedInput);
         customElements.define(ParamListView.TAGS.param_list, ParamListView);
     </script>
-    <script>
-
+    <script des="controller">
 
         //#region View function
         function toggleFullscreen() {
@@ -1227,13 +1365,14 @@
             ]
         };
         function handleContextMenu(e) {
-            const { item, x, y } = e.detail;
+            const { item, x, y, extraParam } = e.detail;
             console.log("🟠 Context menu:", item.name, x, y);
-            type = "param"
+            const type = extraParam[0]
+            const itemName = item.name
             // Build menu items theo type
             menu.innerHTML = MENU_ACTIONS[type]
                 .map(item => `
-      <div class="context-menu-item" onclick="handleContext('${item.label}')">
+      <div class="context-menu-item" onclick="handleContext('${item.label}', '${type}', '${itemName}')">
         ${item.icon} ${item.label}
       </div>
     `).join("");
@@ -1243,10 +1382,10 @@
             menu.style.top = y + "px";
         }
 
-        function handleContext(label) {
-            if (!currentType || !currentName) return;
-            const item = MENU_ACTIONS[currentType].find(x => x.label === label);
-            if (item) item.action(currentName);
+        function handleContext(label, type, itemName) {
+            if (!type || !itemName) return;
+            const item = MENU_ACTIONS[type].find(x => x.label === label);
+            if (item) item.action(itemName);
             menu.style.display = "none";
         }
 
@@ -1291,11 +1430,9 @@
             if (!name) { alert("Tên param không được rỗng!"); return; }
             if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
 
-            if (editingParamName) {
-                delete params[editingParamName];
-                editingParamName = null;
+            if (paramIndexer.has(name)) {
+                alert(`Param ${name} đã tồn tại!`); return;
             }
-
             const newItem = new ObservableListItem({
                 name,
                 value,
@@ -1303,16 +1440,22 @@
                 color,
                 format
             });
-
             observableListParams.addToGroup(group, newItem);
+            newItem.registerListener(e => {
+                const { field, item, newValue, oldValue } = e;
+                if (field == 'value' && newValue != oldValue) {
+                    updateFormulaResults();
+                }
+            });
 
-            // updateFormulaResults();
-            // saveToLocal({
-            //     params: params,
-            //     formulas: formulas
-            // });
-
-            // reset input
+            newItem.registerBeforeValueChangedListener(e => {
+                const { field, item, newValue, oldValue } = e;
+                if (field == 'value') {
+                    floatNewValue = parseFloat(newValue);
+                    return floatNewValue;
+                }
+                return newValue;
+            });
             document.getElementById("paramName").value = "";
             document.getElementById("paramValue").value = "";
             document.getElementById("paramDesc").value = "";
@@ -1334,9 +1477,10 @@
         }
 
         function deleteParam(key) {
-            delete params[key];
-            renderParams();
-            updateFormulaResults();
+            param = paramIndexer.get(key);
+            if (param) {
+                param.parent.remove(param);
+            }
         }
 
         // Render danh sách param với input để chỉnh sửa realtime
