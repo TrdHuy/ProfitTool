@@ -410,13 +410,20 @@
 
                 return proxy;
             }
-
-            toString() {
-                return this.name ?? JSON.stringify(this);
-            }
         }
 
         class ObservableList {
+            static findGroupRecursive(list, name) {
+                for (const it of list.items) {
+                    if (it.name === name && it.children instanceof ObservableList) return it;
+                    if (it.children) {
+                        const found = ObservableList.findGroupRecursive(it.children, name);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+
             constructor(items = [], parent = null) {
                 this._items = items;
                 this._listeners = new Set();      // collection listeners
@@ -431,6 +438,28 @@
                         if (prop === "registerItemListener") return cb => target._itemListeners.add(cb);
                         if (prop === "unregisterItemListener") return cb => target._itemListeners.delete(cb);
 
+                        if (prop === "addNewGroup") {
+                            return (groupName) => {
+                                if (!groupName) {
+                                    return;
+                                }
+                                let group = ObservableList.findGroupRecursive(proxy, groupName);
+                                if (!group) {
+                                    // Nếu chưa có group → tạo mới ở root
+                                    group = new ObservableListItem({
+                                        name: groupName,
+                                        expanded: true,
+                                        children: new ObservableList([], proxy)
+                                    });
+                                    proxy.push(group);
+                                }
+
+                                if (!group.children) {
+                                    group.children = new ObservableList([], proxy);
+                                }
+                                return group;
+                            };
+                        }
                         if (prop === "addToGroup") {
                             return (groupName, item) => {
                                 if (!(item instanceof ObservableListItem)) {
@@ -442,21 +471,7 @@
                                     proxy.push(item);
                                     return;
                                 }
-
-                                // Hàm đệ quy tìm group theo tên trong toàn bộ cây
-                                function findGroupRecursive(list, name) {
-                                    for (const it of list.items) {
-                                        if (it.name === name && it.children instanceof ObservableList) return it;
-                                        if (it.children) {
-                                            const found = findGroupRecursive(it.children, name);
-                                            if (found) return found;
-                                        }
-                                    }
-                                    return null;
-                                }
-
-                                let group = findGroupRecursive(proxy, groupName);
-
+                                let group = ObservableList.findGroupRecursive(proxy, groupName);
                                 if (!group) {
                                     // Nếu chưa có group → tạo mới ở root
                                     group = new ObservableListItem({
@@ -471,6 +486,7 @@
                                 if (!group.children) {
                                     group.children = new ObservableList([], proxy);
                                 }
+                                item.groupName = groupName;
                                 group.children.push(item);
                             };
                         }
@@ -1209,6 +1225,18 @@
     <script des="controller">
 
         //#region View function
+        function toggleBlock(id) {
+            const el = document.getElementById(id);
+            const title = el.previousElementSibling; // h3
+            if (el.style.display === "none") {
+                el.style.display = "block";
+                title.innerText = title.innerText.replace("➕", "➖");
+            } else {
+                el.style.display = "none";
+                title.innerText = title.innerText.replace("➖", "➕");
+            }
+        }
+
         function toggleFullscreen() {
             const btn = document.getElementById("fullscreenBtn");
 
@@ -1263,7 +1291,7 @@
                     const data = JSON.parse(e.target.result);
                     params = data.params || {};
                     formulas = data.formulas || {};
-                    renderParams();
+                    //renderParams();
                     renderFormulas();
                     updateFormulaResults();
                     alert("Import dữ liệu thành công!");
@@ -1402,21 +1430,23 @@
         const paramsView = document.getElementById("paramsView");
         paramsView.data = observableListParams;
 
-        let editingParamName = null;
+        let editingParamKey = null;
 
-        function editParam(name) {
-            const p = params[name];
+        function editParam(key) {
+            p = paramIndexer.get(key);
             if (!p) return;
 
             // Fill input
-            document.getElementById("paramName").value = name;
+            document.getElementById("paramName").value = key;
             document.getElementById("paramValue").value = p.value;
-            document.getElementById("paramGroup").value = p.group;
+            if (p.groupName) {
+                document.getElementById("paramGroup").value = p.groupName;
+            }
             document.getElementById("paramColor").value = p.color;
             document.getElementById("paramDesc").value = p.desc || "";
             document.getElementById("paramFormat").value = p.format;
             document.getElementById("addParamButton").innerHTML = "Cập nhật";
-            editingParamName = name; // đánh dấu đang edit
+            editingParamKey = key; // đánh dấu đang edit
         }
 
         function addParam() {
@@ -1430,50 +1460,59 @@
             if (!name) { alert("Tên param không được rỗng!"); return; }
             if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
 
-            if (paramIndexer.has(name)) {
+
+            if (paramIndexer.has(name) && editingParamKey == null) {
                 alert(`Param ${name} đã tồn tại!`); return;
             }
-            const newItem = new ObservableListItem({
-                name,
-                value,
-                desc,
-                color,
-                format
-            });
-            observableListParams.addToGroup(group, newItem);
-            newItem.registerListener(e => {
-                const { field, item, newValue, oldValue } = e;
-                if (field == 'value' && newValue != oldValue) {
-                    updateFormulaResults();
-                }
-            });
 
-            newItem.registerBeforeValueChangedListener(e => {
-                const { field, item, newValue, oldValue } = e;
-                if (field == 'value') {
-                    floatNewValue = parseFloat(newValue);
-                    return floatNewValue;
+            if (editingParamKey) {
+                oldItem = paramIndexer.get(editingParamKey);
+                oldGroupName = oldItem.groupName;
+                oldItem.name = name;
+                oldItem.value = value;
+                oldItem.desc = desc;
+                oldItem.format = format;
+                editingParamKey = null;
+                if (group != '' && group != oldGroupName) {
+                    if (oldItem.parent) {
+                        oldItem.parent.remove(oldItem);
+                    }
+                    newGroup = observableListParams.addNewGroup(group);
+                    newGroup.children.push(oldItem);
+                    oldItem.groupName = group;
                 }
-                return newValue;
-            });
+                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+            } else {
+                const newItem = new ObservableListItem({
+                    name,
+                    value,
+                    desc,
+                    color,
+                    format
+                });
+                observableListParams.addToGroup(group, newItem);
+                newItem.registerListener(e => {
+                    const { field, item, newValue, oldValue } = e;
+                    if (field == 'value' && newValue != oldValue) {
+                        updateFormulaResults();
+                    }
+                });
+
+                newItem.registerBeforeValueChangedListener(e => {
+                    const { field, item, newValue, oldValue } = e;
+                    if (field == 'value') {
+                        floatNewValue = parseFloat(newValue);
+                        return floatNewValue;
+                    }
+                    return newValue;
+                });
+            }
+
             document.getElementById("paramName").value = "";
             document.getElementById("paramValue").value = "";
             document.getElementById("paramDesc").value = "";
             document.getElementById("paramGroup").value = "";
             document.getElementById("paramColor").value = "#f0f0f0";
-        }
-
-
-        function toggleBlock(id) {
-            const el = document.getElementById(id);
-            const title = el.previousElementSibling; // h3
-            if (el.style.display === "none") {
-                el.style.display = "block";
-                title.innerText = title.innerText.replace("➕", "➖");
-            } else {
-                el.style.display = "none";
-                title.innerText = title.innerText.replace("➖", "➕");
-            }
         }
 
         function deleteParam(key) {
@@ -1483,13 +1522,6 @@
             }
         }
 
-        // Render danh sách param với input để chỉnh sửa realtime
-        let groupState = {}; // Lưu trạng thái expand/collapse của từng group
-
-        function renderParams() {
-        }
-
-
         function updateParamFormatted(key, val) {
             console.log("updateParamFormatted");
             // loại bỏ ký tự không phải số trước
@@ -1497,16 +1529,10 @@
             if (isNaN(num)) num = 0;
             if (params[key]) {
                 params[key].value = num;
-                renderParams();
+                //renderParams();
                 updateFormulaResults();
             }
         }
-
-        function toggleGroup(g) {
-            groupState[g] = !groupState[g];
-            renderParams();
-        }
-
         //#endregion
 
         //#region Formula
@@ -1679,7 +1705,7 @@
 
             params = {};
             formulas = {};
-            renderParams();
+            //renderParams();
             renderFormulas();
             updateFormulaResults();
             saveToLocal({ params, formulas }); // clear cả localStorage luôn
@@ -1697,7 +1723,7 @@
                 const data = JSON.parse(raw);
                 params = data.params || {};
                 formulas = data.formulas || {};
-                renderParams();
+                // renderParams();
                 //renderFormulas();
                 updateFormulaResults();
             } catch (e) {
@@ -1715,12 +1741,12 @@
     <script>
         function handleItemClick(e) {
             const { item } = e.detail;
-            alert("🟢 Clicked: " + item.name);
+            // alert("🟢 Clicked: " + item.name);
         }
 
         function handleGroupToggle(e) {
             const { group, expanded } = e.detail;
-            console.log(`📂 Group ${group.name} is now ${expanded ? "expanded" : "collapsed"}`);
+            // console.log(`📂 Group ${group.name} is now ${expanded ? "expanded" : "collapsed"}`);
         }
     </script>
 </body>
