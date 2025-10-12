@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+     <meta charset="UTF-8">
+     <title>Test FormattedInput</title>
+     <style>
+          body {
+               font-family: "Segoe UI", sans-serif;
+               padding: 20px;
+               background: #f8f8f8;
+          }
+
+          /* CSS ngoài: host-level vars để theme/override nhanh */
+          formatted-input {
+               display: inline-block;
+               margin: 10px;
+               --fi-border-color: #ccc;
+               --fi-bg: #fff;
+               --fi-text-color: #222;
+               --fi-radius: 6px;
+               --fi-padding: 6px 8px;
+               --fi-font-size: 16px;
+               --fi-width: 160px;
+               --fi-focus: #66aaff;
+          }
+
+          formatted-input[format="vnd"] {
+               --fi-text-color: darkgreen;
+          }
+
+          formatted-input[format="usd"] {
+               --fi-text-color: darkblue;
+          }
+     </style>
+</head>
+
+<body>
+     <h2>🔢 Test Custom Element: &lt;formatted-input&gt;</h2>
+
+     <div>
+          <label>Số thường:</label>
+          <formatted-input id="f1" value="1000" format="number" step="1" min="-10"></formatted-input>
+     </div>
+
+     <div>
+          <label>Tiền Việt (VND):</label>
+          <formatted-input id="f2" value="1000000" format="vnd" step="1000" min="0"></formatted-input>
+     </div>
+
+     <div>
+          <label>USD:</label>
+          <formatted-input id="f3" value="200" format="usd" step="1" min="0"></formatted-input>
+     </div>
+
+     <div>
+          <label>Phần trăm (%):</label>
+          <formatted-input id="f4" value="12.5" format="percent" step="0.1" min="0" max="100"></formatted-input>
+     </div>
+
+     <hr>
+     <p><b>Console log:</b> mở DevTools (F12 → tab Console) để xem sự kiện <code>value-changed</code></p>
+
+     <script>
+          class FormattedInput extends HTMLElement {
+               static get observedAttributes() {
+                    // theo dõi cả tham số số học để áp dụng khi bật spinner
+                    return ["value", "format", "min", "max", "step", "spinner"];
+               }
+
+               constructor() {
+                    super();
+                    this._input = document.createElement("input");
+                    // Mặc định hiển thị dạng text (để cho phép chèn ký tự định dạng như "," hoặc " ₫")
+                    this._input.type = "text";
+                    this._input.inputMode = "decimal"; // gợi ý bàn phím số trên mobile
+                    this._rawValue = "";
+
+                    const shadow = this.attachShadow({ mode: "open" });
+
+                    // Style nội bộ cho Shadow DOM, sử dụng biến CSS từ host
+                    const style = document.createElement("style");
+                    style.textContent = `
+          :host { display: inline-block; }
+          input {
+            font-size: var(--fi-font-size, 16px);
+            padding: var(--fi-padding, 6px 8px);
+            width: var(--fi-width, 160px);
+            border: 1px solid var(--fi-border-color, #ccc);
+            border-radius: var(--fi-radius, 6px);
+            background: var(--fi-bg, #fff);
+            color: var(--fi-text-color, #222);
+            text-align: right;
+            box-sizing: border-box;
+          }
+          input:focus {
+            outline: none;
+            border-color: var(--fi-focus, #66aaff);
+            box-shadow: 0 0 2px var(--fi-focus, #66aaff);
+          }
+        `;
+
+                    shadow.append(style, this._input);
+
+                    // FOCUS: chuyển sang type=number để hiển thị mũi tên tăng/giảm (spinner) nếu phù hợp
+                    this._input.addEventListener("focus", () => {
+                         this._input.value = this._rawValue ?? "";
+                         if (this._shouldShowSpinner()) {
+                              this._input.type = "number"; // bật mũi tên ↑↓ native
+                              this._applyNumericAttrs();
+                         }
+                    });
+
+                    // BLUR: quay lại type=text để hiển thị giá trị đã format (có ký tự ₫, %, dấu , ...)
+                    this._input.addEventListener("blur", () => {
+                         // Chuyển về text TRƯỚC, rồi mới set value để tránh 1 số trình duyệt xóa giá trị khi đổi type
+                         const current = this._input.value;
+                         this._input.type = "text";
+                         // Nếu người dùng không nhập gì (""), giữ lại giá trị cũ thay vì biến mất
+                         const val = (current === "" || current == null) ? this._rawValue : current;
+                         this.value = val; // setter sẽ parse & format và cập nhật hiển thị
+                    });
+
+                    // CHANGE: phát sự kiện ra ngoài
+                    this._input.addEventListener("change", () => {
+                         this._emitChanged();
+                    });
+
+                    // Hỗ trợ phím mũi tên ↑↓ tăng/giảm theo step khi đang focus (kể cả type=text)
+                    this._input.addEventListener("keydown", (e) => {
+                         if ((e.key === "ArrowUp" || e.key === "ArrowDown") && this._isNumericFormat()) {
+                              e.preventDefault();
+                              const step = this._readNumberAttr("step", 1);
+                              const dir = e.key === "ArrowUp" ? 1 : -1;
+                              let next = (parseFloat(this._input.value || this._rawValue) || 0) + dir * step;
+                              const min = this._readNumberAttr("min", null);
+                              const max = this._readNumberAttr("max", null);
+                              if (min !== null) next = Math.max(min, next);
+                              if (max !== null) next = Math.min(max, next);
+                              this._input.value = String(next);
+                         }
+                    });
+               }
+
+               // ====== Formatters có thể mở rộng ======
+               static FORMATTERS = {
+                    number: (val) => {
+                         const num = parseFloat(val);
+                         return isNaN(num) ? "" : num.toLocaleString();
+                    },
+                    vnd: (val) => {
+                         const num = parseFloat(val);
+                         return isNaN(num) ? "" : num.toLocaleString("vi-VN") + " ₫";
+                    },
+                    usd: (val) => {
+                         const num = parseFloat(val);
+                         return isNaN(num) ? "" : "$" + num.toLocaleString("en-US");
+                    },
+                    percent: (val) => {
+                         const num = parseFloat(val);
+                         return isNaN(num) ? "" : num.toFixed(2) + "%";
+                    },
+               };
+
+               // ====== Properties ======
+               get value() { return this._rawValue; }
+               set value(v) {
+                    const num = parseFloat(String(v).replace(/[,\s]+/g, ""));
+                    this._rawValue = isNaN(num) ? "" : num;
+                    this._updateDisplay();
+               }
+
+               get format() { return this.getAttribute("format") || "number"; }
+               set format(v) { this.setAttribute("format", v); }
+
+               attributeChangedCallback(name, oldValue, newValue) {
+                    if (oldValue === newValue) return;
+                    if (name === "value") {
+                         this.value = newValue;
+                    } else if (name === "format") {
+                         this._updateDisplay();
+                    } else if (name === "min" || name === "max" || name === "step") {
+                         // áp dụng ngay nếu đang ở chế độ number
+                         this._applyNumericAttrs();
+                    }
+               }
+
+               // ====== Helpers ======
+               _isNumericFormat() {
+                    return ["number", "vnd", "usd", "percent"].includes(this.format);
+               }
+               _shouldShowSpinner() {
+                    // spinner mặc định bật cho format số; có thể tắt bằng spinner="off"
+                    const attr = (this.getAttribute("spinner") || "on").toLowerCase();
+                    return this._isNumericFormat() && attr !== "off";
+               }
+               _applyNumericAttrs() {
+                    if (this._input.type !== "number") return;
+                    const min = this.getAttribute("min");
+                    const max = this.getAttribute("max");
+                    const step = this.getAttribute("step");
+                    if (min !== null) this._input.min = min; else this._input.removeAttribute("min");
+                    if (max !== null) this._input.max = max; else this._input.removeAttribute("max");
+                    if (step !== null) this._input.step = step; else this._input.removeAttribute("step");
+               }
+               _readNumberAttr(name, fallback) {
+                    const v = this.getAttribute(name);
+                    if (v === null || v === "") return fallback;
+                    const n = Number(v);
+                    return Number.isNaN(n) ? fallback : n;
+               }
+               _emitChanged() {
+                    this.dispatchEvent(new CustomEvent("value-changed", {
+                         detail: { value: this._rawValue },
+                         bubbles: true,
+                         composed: true,
+                    }));
+               }
+
+               _updateDisplay() {
+                    const fmt = FormattedInput.FORMATTERS[this.format];
+                    if (fmt) this._input.value = fmt(this._rawValue);
+                    else this._input.value = this._rawValue;
+               }
+          }
+
+          customElements.define("formatted-input", FormattedInput);
+
+          // Log sự kiện thay đổi
+          document.querySelectorAll("formatted-input").forEach(el => {
+               el.addEventListener("value-changed", e => {
+                    console.log(`[${el.format}] changed →`, e.detail.value);
+               });
+          });
+     </script>
+</body>
+
+</html>
