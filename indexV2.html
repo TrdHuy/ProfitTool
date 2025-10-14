@@ -315,7 +315,8 @@
                 <template>
                     <div class="param-item">
                         <div style="display: block;">
-                            <span>{{name}}: {{display}}</span> =
+                            <span>{{name}}</span>:
+                            <span>{{display}}</span> =
                             <span>{{result}}</span>
                             <div style="font-size:12px; color:#666;">{{desc}}</div>
                         </div>
@@ -1015,6 +1016,7 @@
                                 if (attr.name === "value" && el.tagName === "INPUT") {
                                     el.value = itemData[key];
                                     el.addEventListener("input", () => {
+                                        console.log("el input changed");
                                         itemData[key] = el.value; // view → model
                                     });
                                 }
@@ -1291,8 +1293,6 @@
                     const data = JSON.parse(e.target.result);
                     params = data.params || {};
                     formulas = data.formulas || {};
-                    //renderParams();
-                    renderFormulas();
                     updateFormulaResults();
                     alert("Import dữ liệu thành công!");
                 } catch (err) {
@@ -1522,17 +1522,6 @@
             }
         }
 
-        function updateParamFormatted(key, val) {
-            console.log("updateParamFormatted");
-            // loại bỏ ký tự không phải số trước
-            let num = parseFloat(val.replace(/[^\d.-]/g, ""));
-            if (isNaN(num)) num = 0;
-            if (params[key]) {
-                params[key].value = num;
-                //renderParams();
-                updateFormulaResults();
-            }
-        }
         //#endregion
 
         //#region Formula
@@ -1542,7 +1531,7 @@
 
         const formulasView = document.getElementById("formulasView");
         formulasView.data = observableListFormulas;
-        let editingFormulaName = null;
+        let editingFormulaKey = null;
 
         // Format công thức: thêm khoảng trắng và đổi * thành ×
         function formatFormulaDisplay(formula) {
@@ -1554,21 +1543,27 @@
                 .trim();
         }
 
-        function deleteFormula(name) {
-            delete formulas[name];
-            renderFormulas();
+        function deleteFormula(key) {
+            formula = formulaIndexer.get(key);
+            if (formula) {
+                formula.parent.remove(formula);
+            }
             updateFormulaResults();
         }
 
-        function editFormula(name) {
-            const f = formulas[name];
-            if (!f) return;
+        function editFormula(key) {
+            p = formulaIndexer.get(key);
+            if (!p) return;
 
-            document.getElementById("formulaName").value = name;
-            document.getElementById("formulaInput").value = f.raw;
-            document.getElementById("formulaDesc").value = f.desc || "";
-
-            editingFormulaName = name;
+            // Fill input
+            document.getElementById("formulaName").value = key;
+            document.getElementById("formulaDesc").value = p.desc;
+            if (p.groupName) {
+                document.getElementById("formulaGroup").value = p.groupName;
+            }
+            document.getElementById("formulaInput").value = p.raw;
+            document.getElementById("addFormulaButton").innerHTML = "Cập nhật";
+            editingFormulaKey = key; // đánh dấu đang edit
         }
 
         function addFormula() {
@@ -1579,22 +1574,37 @@
 
             if (!formula) { alert("Chưa nhập công thức!"); return; }
 
-            // Nếu đang edit → xóa công thức cũ
-            if (editingFormulaName) {
-                document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
-                delete formulas[editingFormulaName];
-                editingFormulaName = null;
+            if (formulaIndexer.has(name) && editingFormulaKey == null) {
+                alert(`Công thức ${name} đã tồn tại!`); return;
             }
+            if (editingFormulaKey) {
+                oldItem = formulaIndexer.get(editingFormulaKey);
+                oldGroupName = oldItem.groupName;
+                oldItem.name = name;
+                oldItem.raw = formula;
+                oldItem.desc = desc;
+                oldItem.display = formula;
+                editingFormulaKey = null;
+                if (group != '' && group != oldGroupName) {
+                    if (oldItem.parent) {
+                        oldItem.parent.remove(oldItem);
+                    }
+                    newGroup = observableListParams.addNewGroup(group);
+                    newGroup.children.push(oldItem);
+                    oldItem.groupName = group;
+                }
+                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+            } else {
+                const newItem = new ObservableListItem({
+                    name: name,
+                    raw: formula,
+                    desc: desc,
+                    display: formula,
+                    result: "1"
+                });
 
-            const newItem = new ObservableListItem({
-                name: name,
-                raw: formula,
-                desc: desc,
-                display: formula,
-                result: "1"
-            });
-
-            observableListFormulas.addToGroup(group, newItem);
+                observableListFormulas.addToGroup(group, newItem);
+            }
 
             updateFormulaResults();
 
@@ -1602,24 +1612,6 @@
             document.getElementById("formulaInput").value = "";
             document.getElementById("formulaDesc").value = "";
             document.getElementById("formulaGroup").value = "";
-        }
-
-        // Render danh sách công thức
-        function renderFormulas() {
-            let html = "<h4>Danh sách công thức:</h4>";
-            for (let [name, f] of Object.entries(formulas)) {
-                html += `
-      <div class="formula-item list-item" 
-            oncontextmenu="openContextMenu(event, 'formula', '${name}')"
-            style="--list-item-bg:${'#dddddd'};">
-        <div>
-          <span><b>${name}</b>: <span id="formulaDisplay_${name}">${f.display}</span></span>
-          <span id="formulaResult_${name}" class="formula-result"></span>
-          <div style="font-size:12px; color:#666;">${f.desc || ""}</div>
-        </div>
-      </div>`;
-            }
-            document.getElementById("formulas").innerHTML = html;
         }
 
         // Tính toán lại tất cả công thức
@@ -1705,8 +1697,6 @@
 
             params = {};
             formulas = {};
-            //renderParams();
-            renderFormulas();
             updateFormulaResults();
             saveToLocal({ params, formulas }); // clear cả localStorage luôn
         }
@@ -1723,8 +1713,6 @@
                 const data = JSON.parse(raw);
                 params = data.params || {};
                 formulas = data.formulas || {};
-                // renderParams();
-                //renderFormulas();
                 updateFormulaResults();
             } catch (e) {
                 console.error("Không load được dữ liệu local:", e);
