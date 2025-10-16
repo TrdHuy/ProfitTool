@@ -407,7 +407,7 @@
                 proxy.unregisterListener = cb => proxy._valueChangedListeners.delete(cb);
                 proxy.registerBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.add(cb);
                 proxy.unregisterBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.delete(cb);
-                proxy.toPlainObject = () => ObservableList.serializeItem(proxy);
+                proxy.toPlainObject = () => ObservableListItem.toPlain(proxy);
 
 
                 return proxy;
@@ -421,10 +421,32 @@
                     : undefined;
 
                 const item = new ObservableListItem(rest, childItems);
-                if (item.children instanceof ObservableList) {
-                    item.children._parent = item;
-                }
                 return item;
+            }
+            static toPlain(item) {
+                if (!item || typeof item !== "object") return {};
+
+                const plain = {};
+
+                Object.keys(item).forEach(key => {
+                    if (key === "parent" || key === "children") return;
+                    if (key.startsWith("_")) return;
+
+                    const value = item[key];
+                    if (typeof value === "function") return;
+                    if (value instanceof Set) return;
+
+                    plain[key] = value;
+                });
+
+                const { children } = item;
+                if (children && typeof children.toPlainArray === "function") {
+                    plain.children = children.toPlainArray();
+                } else if (Array.isArray(children)) {
+                    plain.children = children.map(ObservableListItem.toPlain);
+                }
+
+                return plain;
             }
         }
 
@@ -589,6 +611,9 @@
                         }
 
 
+                        if (prop === "toPlainArray") {
+                            return () => target._items.map(ObservableListItem.toPlain);
+                        }
                         if (prop === "parent") return target._parent;
                         if (prop === "items") return target._items;
                         if (prop === "notifyCollection") return e => target._notify(e);
@@ -609,31 +634,9 @@
             }
             _notifyCollection(e) { this._listeners.forEach(cb => cb(e)); }
             _notifyItem(e) { this._itemListeners.forEach(cb => cb(e)); }
-            static serializeItem(item) {
-                if (!item || typeof item !== "object") return {};
-
-                const plain = {};
-
-                Object.keys(item).forEach(key => {
-                    if (key === "parent" || key === "children") return;
-                    if (key.startsWith("_")) return;
-
-                    const value = item[key];
-                    if (typeof value === "function") return;
-                    if (value instanceof Set) return;
-
-                    plain[key] = value;
-                });
-
-                if (item.children instanceof ObservableList) {
-                    plain.children = ObservableList.serialize(item.children);
-                }
-
-                return plain;
-            }
             static serialize(list) {
                 if (!(list instanceof ObservableList)) return [];
-                return list.items.map(item => ObservableList.serializeItem(item));
+                return list.toPlainArray();
             }
             static loadFromPlain(list, dataArray = []) {
                 if (!(list instanceof ObservableList)) return;
