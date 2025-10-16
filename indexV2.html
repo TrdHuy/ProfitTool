@@ -407,9 +407,46 @@
                 proxy.unregisterListener = cb => proxy._valueChangedListeners.delete(cb);
                 proxy.registerBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.add(cb);
                 proxy.unregisterBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.delete(cb);
+                proxy.toPlainObject = () => ObservableListItem.toPlain(proxy);
 
 
                 return proxy;
+            }
+            static fromPlain(data) {
+                if (!data || typeof data !== "object") return null;
+
+                const { children, ...rest } = data;
+                const childItems = Array.isArray(children)
+                    ? children.map(ObservableListItem.fromPlain).filter(Boolean)
+                    : undefined;
+
+                const item = new ObservableListItem(rest, childItems);
+                return item;
+            }
+            static toPlain(item) {
+                if (!item || typeof item !== "object") return {};
+
+                const plain = {};
+
+                Object.keys(item).forEach(key => {
+                    if (key === "parent" || key === "children") return;
+                    if (key.startsWith("_")) return;
+
+                    const value = item[key];
+                    if (typeof value === "function") return;
+                    if (value instanceof Set) return;
+
+                    plain[key] = value;
+                });
+
+                const { children } = item;
+                if (children && typeof children.toPlainArray === "function") {
+                    plain.children = children.toPlainArray();
+                } else if (Array.isArray(children)) {
+                    plain.children = children.map(ObservableListItem.toPlain);
+                }
+
+                return plain;
             }
         }
 
@@ -574,6 +611,9 @@
                         }
 
 
+                        if (prop === "toPlainArray") {
+                            return () => target._items.map(ObservableListItem.toPlain);
+                        }
                         if (prop === "parent") return target._parent;
                         if (prop === "items") return target._items;
                         if (prop === "notifyCollection") return e => target._notify(e);
@@ -594,6 +634,23 @@
             }
             _notifyCollection(e) { this._listeners.forEach(cb => cb(e)); }
             _notifyItem(e) { this._itemListeners.forEach(cb => cb(e)); }
+            static serialize(list) {
+                if (!(list instanceof ObservableList)) return [];
+                return list.toPlainArray();
+            }
+            static loadFromPlain(list, dataArray = []) {
+                if (!(list instanceof ObservableList)) return;
+
+                list.splice(0, list.items.length);
+                if (!Array.isArray(dataArray)) return;
+
+                dataArray.forEach(data => {
+                    const item = ObservableListItem.fromPlain(data);
+                    if (item) {
+                        list.push(item);
+                    }
+                });
+            }
         }
 
         class ObservableIndexer {
@@ -1347,18 +1404,109 @@
             }
         }
 
+        let isRestoring = false;
+
+        function getCurrentWorkspaceData() {
+            return {
+                params: ObservableList.serialize(observableListParams),
+                formulas: ObservableList.serialize(observableListFormulas)
+            };
+        }
+
+        function normalizeParamData(raw) {
+            if (Array.isArray(raw)) return raw;
+            if (!raw || typeof raw !== "object") return [];
+            return Object.entries(raw).map(([name, value]) => {
+                if (value && typeof value === "object" && !Array.isArray(value)) {
+                    return { name, ...value };
+                }
+                return { name, value };
+            });
+        }
+
+        function normalizeFormulaData(raw) {
+            if (Array.isArray(raw)) return raw;
+            if (!raw || typeof raw !== "object") return [];
+            return Object.entries(raw).map(([name, value]) => {
+                if (value && typeof value === "object" && !Array.isArray(value)) {
+                    return { name, ...value };
+                }
+                return { name, raw: value, display: value };
+            });
+        }
+
+        function traverseList(list, callback) {
+            if (!(list instanceof ObservableList)) return;
+            list.items.forEach(item => {
+                callback(item);
+                if (item.children instanceof ObservableList) {
+                    traverseList(item.children, callback);
+                }
+            });
+        }
+
+        function ensureParamListeners(item) {
+            if (!item || item.children instanceof ObservableList) {
+                return;
+            }
+            if (item._paramListenersAttached) return;
+
+            item.registerListener(e => {
+                const { field, newValue, oldValue } = e;
+                if (field === "value" && newValue !== oldValue) {
+                    updateFormulaResults();
+                }
+                persistWorkspace();
+            });
+
+            item.registerBeforeValueChangedListener(e => {
+                if (e.field === "value") {
+                    const parsed = parseFloat(e.newValue);
+                    return isNaN(parsed) ? 0 : parsed;
+                }
+                return e.newValue;
+            });
+
+            item._paramListenersAttached = true;
+        }
+
+        function persistWorkspace() {
+            if (isRestoring) return;
+            saveToLocal();
+        }
+
+        function restoreWorkspace(data) {
+            isRestoring = true;
+            try {
+                const normalizedParams = normalizeParamData(data?.params);
+                const normalizedFormulas = normalizeFormulaData(data?.formulas);
+
+                ObservableList.loadFromPlain(observableListParams, normalizedParams);
+                ObservableList.loadFromPlain(observableListFormulas, normalizedFormulas);
+
+                editingParamKey = null;
+                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+                editingFormulaKey = null;
+                document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
+
+                traverseList(observableListParams, ensureParamListeners);
+                updateFormulaResults();
+            } finally {
+                isRestoring = false;
+            }
+
+            persistWorkspace();
+        }
+
         function exportData() {
             // Hỏi tên file
             let filename = prompt("Nhập tên file để lưu:", "pt-data");
             if (filename === null) return; // user bấm Cancel
             filename = filename.trim() || "pt-data"; // nếu bỏ trống thì lấy mặc định
 
-            // Gom dữ liệu
-            const data = {
-                params: params,
-                formulas: formulas
-            };
-            saveToLocal(data)
+            const data = getCurrentWorkspaceData();
+            saveToLocal(data);
+
             // Tạo file JSON
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
@@ -1377,9 +1525,7 @@
             reader.onload = (e) => {
                 try {
                     const data = JSON.parse(e.target.result);
-                    params = data.params || {};
-                    formulas = data.formulas || {};
-                    updateFormulaResults();
+                    restoreWorkspace(data);
                     alert("Import dữ liệu thành công!");
                 } catch (err) {
                     alert("File không hợp lệ: " + err.message);
@@ -1509,7 +1655,6 @@
         //#endregion 
 
         //#region Param
-        let params = {};
         const observableListParams = new ObservableList([]);
         const paramIndexer = new ObservableIndexer(observableListParams, "name");
 
@@ -1577,21 +1722,7 @@
                     format
                 });
                 observableListParams.addToGroup(group, newItem);
-                newItem.registerListener(e => {
-                    const { field, item, newValue, oldValue } = e;
-                    if (field == 'value' && newValue != oldValue) {
-                        updateFormulaResults();
-                    }
-                });
-
-                newItem.registerBeforeValueChangedListener(e => {
-                    const { field, item, newValue, oldValue } = e;
-                    if (field == 'value') {
-                        floatNewValue = parseFloat(newValue);
-                        return floatNewValue;
-                    }
-                    return newValue;
-                });
+                ensureParamListeners(newItem);
             }
 
             document.getElementById("paramName").value = "";
@@ -1599,6 +1730,8 @@
             document.getElementById("paramDesc").value = "";
             document.getElementById("paramGroup").value = "";
             document.getElementById("paramColor").value = "#f0f0f0";
+
+            persistWorkspace();
         }
 
         function deleteParam(key) {
@@ -1606,12 +1739,13 @@
             if (param) {
                 param.parent.remove(param);
             }
+            updateFormulaResults();
+            persistWorkspace();
         }
 
         //#endregion
 
         //#region Formula
-        let formulas = {};   // key = tên công thức, value = { raw, display }
         const observableListFormulas = new ObservableList([]);
         const formulaIndexer = new ObservableIndexer(observableListFormulas, "name");
 
@@ -1635,6 +1769,7 @@
                 formula.parent.remove(formula);
             }
             updateFormulaResults();
+            persistWorkspace();
         }
 
         function editFormula(key) {
@@ -1653,7 +1788,14 @@
         }
 
         function addFormula() {
-            const name = document.getElementById("formulaName").value.trim() || `C${Object.keys(formulas).length + 1}`;
+            const nameInput = document.getElementById("formulaName").value.trim();
+            let name = nameInput;
+            if (!name) {
+                let counter = 1;
+                do {
+                    name = `C${counter++}`;
+                } while (formulaIndexer.has(name));
+            }
             const formula = document.getElementById("formulaInput").value.trim();
             const desc = document.getElementById("formulaDesc").value.trim();
             const group = document.getElementById("formulaGroup").value.trim();
@@ -1675,11 +1817,11 @@
                     if (oldItem.parent) {
                         oldItem.parent.remove(oldItem);
                     }
-                    newGroup = observableListParams.addNewGroup(group);
+                    newGroup = observableListFormulas.addNewGroup(group);
                     newGroup.children.push(oldItem);
                     oldItem.groupName = group;
                 }
-                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+                document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
             } else {
                 const newItem = new ObservableListItem({
                     name: name,
@@ -1698,6 +1840,8 @@
             document.getElementById("formulaInput").value = "";
             document.getElementById("formulaDesc").value = "";
             document.getElementById("formulaGroup").value = "";
+
+            persistWorkspace();
         }
 
         // Tính toán lại tất cả công thức
@@ -1705,6 +1849,7 @@
             let scope = {};
             // 1) Map params -> scope (lấy field value nếu là object)
             for (let [k, v] of paramIndexer.entries()) {
+                if (v && v.children instanceof ObservableList) continue;
                 scope[k] = (v && typeof v === "object" && "value" in v) ? v.value : v;
             }
 
@@ -1738,6 +1883,7 @@
             const ALLOWED_NAMES = new Set([...Object.keys(scope), "Math"]);
 
             for (let [name, f] of formulaIndexer.entries()) {
+                if (f && f.children instanceof ObservableList) continue;
                 try {
                     let keys = Object.keys(scope);
                     let values = Object.values(scope);
@@ -1781,14 +1927,19 @@
         function clearWorkspace() {
             if (!confirm("Bạn có chắc muốn xoá toàn bộ Param và Formula hiện tại không?")) return;
 
-            params = {};
-            formulas = {};
+            observableListParams.splice(0, observableListParams.items.length);
+            observableListFormulas.splice(0, observableListFormulas.items.length);
+            editingParamKey = null;
+            document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+            editingFormulaKey = null;
+            document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
             updateFormulaResults();
-            saveToLocal({ params, formulas }); // clear cả localStorage luôn
+            persistWorkspace();
         }
 
-        function saveToLocal(data) {
-            localStorage.setItem("pt-latest-data", JSON.stringify(data));
+        function saveToLocal(data = null) {
+            const payload = data || getCurrentWorkspaceData();
+            localStorage.setItem("pt-latest-data", JSON.stringify(payload));
         }
 
         // Load khi mở page
@@ -1797,9 +1948,7 @@
             if (!raw) return;
             try {
                 const data = JSON.parse(raw);
-                params = data.params || {};
-                formulas = data.formulas || {};
-                updateFormulaResults();
+                restoreWorkspace(data);
             } catch (e) {
                 console.error("Không load được dữ liệu local:", e);
             }
@@ -1809,7 +1958,7 @@
         window.addEventListener("DOMContentLoaded", loadFromLocal);
 
 
-        // Chèn saveToLocal() vào cuối addParam, addFormula, deleteParam, deleteFormula
+        // Lưu trạng thái workspace đã được xử lý trong persistWorkspace()
 
     </script>
     <script>
