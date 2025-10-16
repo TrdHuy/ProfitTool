@@ -407,9 +407,24 @@
                 proxy.unregisterListener = cb => proxy._valueChangedListeners.delete(cb);
                 proxy.registerBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.add(cb);
                 proxy.unregisterBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.delete(cb);
+                proxy.toPlainObject = () => ObservableList.serializeItem(proxy);
 
 
                 return proxy;
+            }
+            static fromPlain(data) {
+                if (!data || typeof data !== "object") return null;
+
+                const { children, ...rest } = data;
+                const childItems = Array.isArray(children)
+                    ? children.map(ObservableListItem.fromPlain).filter(Boolean)
+                    : undefined;
+
+                const item = new ObservableListItem(rest, childItems);
+                if (item.children instanceof ObservableList) {
+                    item.children._parent = item;
+                }
+                return item;
             }
         }
 
@@ -594,6 +609,45 @@
             }
             _notifyCollection(e) { this._listeners.forEach(cb => cb(e)); }
             _notifyItem(e) { this._itemListeners.forEach(cb => cb(e)); }
+            static serializeItem(item) {
+                if (!item || typeof item !== "object") return {};
+
+                const plain = {};
+
+                Object.keys(item).forEach(key => {
+                    if (key === "parent" || key === "children") return;
+                    if (key.startsWith("_")) return;
+
+                    const value = item[key];
+                    if (typeof value === "function") return;
+                    if (value instanceof Set) return;
+
+                    plain[key] = value;
+                });
+
+                if (item.children instanceof ObservableList) {
+                    plain.children = ObservableList.serialize(item.children);
+                }
+
+                return plain;
+            }
+            static serialize(list) {
+                if (!(list instanceof ObservableList)) return [];
+                return list.items.map(item => ObservableList.serializeItem(item));
+            }
+            static loadFromPlain(list, dataArray = []) {
+                if (!(list instanceof ObservableList)) return;
+
+                list.splice(0, list.items.length);
+                if (!Array.isArray(dataArray)) return;
+
+                dataArray.forEach(data => {
+                    const item = ObservableListItem.fromPlain(data);
+                    if (item) {
+                        list.push(item);
+                    }
+                });
+            }
         }
 
         class ObservableIndexer {
@@ -1349,66 +1403,11 @@
 
         let isRestoring = false;
 
-        function serializeObservableItem(item) {
-            const plain = {};
-
-            Object.keys(item).forEach(key => {
-                if (key === "parent" || key === "children") return;
-                if (key.startsWith("_")) return;
-
-                const value = item[key];
-                if (typeof value === "function") return;
-                if (value instanceof Set) return;
-
-                plain[key] = value;
-            });
-
-            if (item.children instanceof ObservableList) {
-                plain.children = serializeObservableList(item.children);
-            }
-
-            return plain;
-        }
-
-        function serializeObservableList(list) {
-            if (!(list instanceof ObservableList)) return [];
-            return list.items.map(item => serializeObservableItem(item));
-        }
-
         function getCurrentWorkspaceData() {
             return {
-                params: serializeObservableList(observableListParams),
-                formulas: serializeObservableList(observableListFormulas)
+                params: ObservableList.serialize(observableListParams),
+                formulas: ObservableList.serialize(observableListFormulas)
             };
-        }
-
-        function createObservableItemFromPlain(data) {
-            if (!data || typeof data !== "object") return null;
-
-            const { children, ...rest } = data;
-            const childItems = Array.isArray(children)
-                ? children.map(createObservableItemFromPlain).filter(Boolean)
-                : undefined;
-
-            const item = new ObservableListItem(rest, childItems);
-            if (item.children instanceof ObservableList) {
-                item.children._parent = item;
-            }
-            return item;
-        }
-
-        function deserializeObservableList(list, dataArray = []) {
-            if (!(list instanceof ObservableList)) return;
-
-            list.splice(0, list.items.length);
-            if (!Array.isArray(dataArray)) return;
-
-            dataArray.forEach(data => {
-                const item = createObservableItemFromPlain(data);
-                if (item) {
-                    list.push(item);
-                }
-            });
         }
 
         function normalizeParamData(raw) {
@@ -1479,8 +1478,8 @@
                 const normalizedParams = normalizeParamData(data?.params);
                 const normalizedFormulas = normalizeFormulaData(data?.formulas);
 
-                deserializeObservableList(observableListParams, normalizedParams);
-                deserializeObservableList(observableListFormulas, normalizedFormulas);
+                ObservableList.loadFromPlain(observableListParams, normalizedParams);
+                ObservableList.loadFromPlain(observableListFormulas, normalizedFormulas);
 
                 editingParamKey = null;
                 document.getElementById("addParamButton").innerHTML = "Thêm tham số";
