@@ -25,7 +25,7 @@
 
         /* #region list-item*/
         /* Param và Formula item chung */
-        .list-item {
+        .param-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -37,21 +37,26 @@
             transition: background 0.2s, transform 0.1s;
         }
 
-        .list-item:hover {
+        .param-item:hover {
             background: #f5faff;
         }
 
-        .list-item:active {
+        .param-item:active {
             background: #dbe9ff;
             transform: scale(0.98);
         }
 
-        /* Khi long-press (dành cho mobile, thêm class .long-press bằng JS) */
-        .list-item.long-press {
-            background: #ffe8cc;
-            /* cam nhạt */
+        .group-header {
+            font-weight: bold;
+            cursor: pointer;
+            background: #eee;
+            padding: 4px;
+            border-radius: 4px;
         }
 
+        .group-children {
+            margin-left: 20px;
+        }
 
         /* #endregion */
         .block {
@@ -276,8 +281,19 @@
 
                 <button onclick="addParam()" id="addParamButton">Thêm tham số</button>
             </div>
-            <div id="params" class="scroll-box"></div>
+            <param-list id="paramsView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('param')"
+                ongrouptoggle="handleGroupToggle">
+                <template>
+                    <div class="param-item">
+                        <div style="display: block;">
+                            <span>{{name}}</span> =
+                            <formatted-input value="{{value}}" readonly></formatted-input>
+                            <div style="font-size:12px; color:#666;">{{desc}}</div>
+                        </div>
+                    </div>
 
+                </template>
+            </param-list>
         </div>
 
         <div class="divider" id="divider"></div>
@@ -289,123 +305,1083 @@
             <label>Mô tả:</label>
             <auto-scroll-input type="text" id="formulaDesc"
                 placeholder="Ví dụ: doanh thu hàng tháng"></auto-scroll-input>
+            <label>Group:</label>
+            <auto-scroll-input type="text" id="formulaGroup" placeholder="Ví dụ: doanh thu"></auto-scroll-input>
             <label>Công thức:</label>
             <auto-scroll-input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2"></auto-scroll-input>
             <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
-            <div id="formulas" class="scroll-box"></div>
+            <param-list id="formulasView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('formula')"
+                ongrouptoggle="handleGroupToggle">
+                <template>
+                    <div class="param-item">
+                        <div style="display: block;">
+                            <span>{{name}}</span>:
+                            <span>{{display}}</span> =
+                            <formatted-input value="{{result}}" readonly></formatted-input>
+                            <div style="font-size:12px; color:#666;">{{desc}}</div>
+                        </div>
+                    </div>
+                </template>
+            </param-list>
         </div>
 
 
     </div>
     <div id="contextMenu" class="context-menu">
     </div>
-
-    <script>
-
+    <script des="definition">
         const isMobile = /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+    </script>
+    <script des="utils">
+        class ObservableListItem {
+            constructor(data = {}, children = null) {
+                // Copy toàn bộ field từ dict vào object
+                Object.assign(this, data);
 
-        class AutoScrollInput extends HTMLElement {
-            connectedCallback() {
-                // nếu trong tag chưa có input thì mới tạo
-                if (!this.querySelector("input")) {
-                    const input = document.createElement("input");
+                // Tạo danh sách con nếu có
+                if (children instanceof ObservableList) {
+                    this.children = children;
+                } else if (Array.isArray(children)) {
+                    this.children = new ObservableList(children);
+                } else if (Array.isArray(data.children)) {
+                    this.children = new ObservableList(data.children);
+                } else if (data.children instanceof ObservableList) {
+                    this.children = data.children;
+                } else {
+                    this.children = null;
+                }
 
-                    // copy toàn bộ attribute từ custom tag xuống input
-                    Array.from(this.attributes).forEach(attr => {
-                        input.setAttribute(attr.name, attr.value);
-                    });
+                // ✅ Gán parent cho children nếu có
+                if (this.children) {
+                    this.children._parent = this;
+                }
 
-                    // auto scroll khi focus
-                    input.addEventListener("focus", () => {
-                        if (isMobile) {
-                            setTimeout(() => {
-                                input.scrollIntoView({ behavior: "smooth", block: "center" });
-                            }, 300);
+                const self = this;
+                const proxy = new Proxy(this, {
+                    set(target, prop, value) {
+                        const oldValue = target[prop];
+                        const changed = oldValue !== value;
+                        if (
+                            changed &&
+                            prop !== "parent" &&
+                            prop !== "children" &&
+                            typeof prop === "string"
+                        ) {
+
+                            // Nếu item có listener riêng
+                            if (self._beforeValueChangedlisteners && self._beforeValueChangedlisteners.size > 0) {
+                                self._beforeValueChangedlisteners.forEach(cb =>
+                                    value = cb({ field: prop, oldValue, newValue: value, item: proxy }) || value
+                                );
+                            }
+                        }
+                        // gán giá trị
+                        target[prop] = value;
+
+                        // nếu giá trị thay đổi và không phải internal field → phát sự kiện
+                        if (
+                            changed &&
+                            prop !== "parent" &&
+                            prop !== "children" &&
+                            typeof prop === "string"
+                        ) {
+
+                            // Nếu item có listener riêng
+                            if (self._valueChangedListeners && self._valueChangedListeners.size > 0) {
+                                self._valueChangedListeners.forEach(cb =>
+                                    cb({ field: prop, oldValue, newValue: value, item: proxy })
+                                );
+                            }
+                        }
+
+                        return true;
+                    },
+                    get(target, prop) {
+                        return target[prop];
+                    },
+                });
+                // lưu set listener riêng cho item nếu cần
+                proxy._valueChangedListeners = new Set();
+                proxy._beforeValueChangedlisteners = new Set();
+                proxy.registerListener = cb => proxy._valueChangedListeners.add(cb);
+                proxy.unregisterListener = cb => proxy._valueChangedListeners.delete(cb);
+                proxy.registerBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.add(cb);
+                proxy.unregisterBeforeValueChangedListener = cb => proxy._beforeValueChangedlisteners.delete(cb);
+                proxy.toPlainObject = () => ObservableListItem.toPlain(proxy);
+
+
+                return proxy;
+            }
+            static fromPlain(data) {
+                if (!data || typeof data !== "object") return null;
+
+                const { children, ...rest } = data;
+                const childItems = Array.isArray(children)
+                    ? children.map(ObservableListItem.fromPlain).filter(Boolean)
+                    : undefined;
+
+                const item = new ObservableListItem(rest, childItems);
+                return item;
+            }
+            static toPlain(item) {
+                if (!item || typeof item !== "object") return {};
+
+                const plain = {};
+
+                Object.keys(item).forEach(key => {
+                    if (key === "parent" || key === "children") return;
+                    if (key.startsWith("_")) return;
+
+                    const value = item[key];
+                    if (typeof value === "function") return;
+                    if (value instanceof Set) return;
+
+                    plain[key] = value;
+                });
+
+                const { children } = item;
+                if (children && typeof children.toPlainArray === "function") {
+                    plain.children = children.toPlainArray();
+                } else if (Array.isArray(children)) {
+                    plain.children = children.map(ObservableListItem.toPlain);
+                }
+
+                return plain;
+            }
+        }
+
+        class ObservableList {
+            static findGroupRecursive(list, name) {
+                for (const it of list.items) {
+                    if (it.name === name && it.children instanceof ObservableList) return it;
+                    if (it.children) {
+                        const found = ObservableList.findGroupRecursive(it.children, name);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            }
+
+            constructor(items = [], parent = null) {
+                this._items = items;
+                this._listeners = new Set();      // collection listeners
+                this._itemListeners = new Set();  // item change listeners
+                this._parent = parent; // list cha (có thể là list gốc hoặc group con)
+
+                const proxy = new Proxy(this, {
+                    get: (target, prop) => {
+                        if (prop === "registerListener") return cb => target._listeners.add(cb);
+                        if (prop === "unregisterListener") return cb => target._listeners.delete(cb);
+
+                        if (prop === "registerItemListener") return cb => target._itemListeners.add(cb);
+                        if (prop === "unregisterItemListener") return cb => target._itemListeners.delete(cb);
+
+                        if (prop === "addNewGroup") {
+                            return (groupName) => {
+                                if (!groupName) {
+                                    return;
+                                }
+                                let group = ObservableList.findGroupRecursive(proxy, groupName);
+                                if (!group) {
+                                    // Nếu chưa có group → tạo mới ở root
+                                    group = new ObservableListItem({
+                                        name: groupName,
+                                        expanded: true,
+                                        children: new ObservableList([], proxy)
+                                    });
+                                    proxy.push(group);
+                                }
+
+                                if (!group.children) {
+                                    group.children = new ObservableList([], proxy);
+                                }
+                                return group;
+                            };
+                        }
+                        if (prop === "addToGroup") {
+                            return (groupName, item) => {
+                                if (!(item instanceof ObservableListItem)) {
+                                    throw new Error("addToGroup() expects an ObservableListItem instance.");
+                                }
+
+                                // Nếu không nhập group name → thêm thẳng vào root
+                                if (!groupName) {
+                                    proxy.push(item);
+                                    return;
+                                }
+                                let group = ObservableList.findGroupRecursive(proxy, groupName);
+                                if (!group) {
+                                    // Nếu chưa có group → tạo mới ở root
+                                    group = new ObservableListItem({
+                                        name: groupName,
+                                        expanded: true,
+                                        children: new ObservableList([], proxy)
+                                    });
+                                    proxy.push(group);
+                                }
+
+                                // Thêm item vào trong group
+                                if (!group.children) {
+                                    group.children = new ObservableList([], proxy);
+                                }
+                                item.groupName = groupName;
+                                group.children.push(item);
+                            };
+                        }
+
+                        if (prop === "push") {
+                            return (...args) => {
+                                args.forEach(it => {
+                                    if (!(it instanceof ObservableListItem)) {
+                                        throw new Error("push() expects only ObservableListItem instances.");
+                                    }
+                                    it.parent = proxy;
+                                });
+                                const startIndex = target._items.length;
+                                const result = target._items.push(...args);
+                                args.forEach((item, i) =>
+                                    target._notifyCollection({ action: "add", index: startIndex + i, item })
+                                );
+                                return result;
+                            };
+                        }
+
+                        if (prop === "set") {
+                            return (i, val) => {
+                                if (!(val instanceof ObservableListItem)) {
+                                    throw new Error("set() expects an ObservableListItem instance.");
+                                }
+                                val.parent = proxy;
+                                const oldItem = target._items[i];
+                                target._items[i] = val;
+                                target._notifyCollection({ action: "set", oldItem, newItem: val });
+                            };
+                        }
+
+                        if (prop === "remove") {
+                            return (item) => {
+                                const index = target._items.indexOf(item);
+                                if (index === -1) return false; // không tìm thấy
+
+                                // Xóa item khỏi danh sách
+                                const removed = target._items.splice(index, 1);
+                                removed.forEach(it => (it.parent = null));
+
+                                // Gửi sự kiện thông báo
+                                target._notifyCollection({
+                                    action: "remove",
+                                    index,
+                                    items: removed
+                                });
+
+                                return true;
+                            };
+                        }
+
+                        if (prop === "splice") {
+                            return (start, deleteCount, ...itemsToAdd) => {
+                                itemsToAdd.forEach(it => {
+                                    if (!(it instanceof ObservableListItem)) {
+                                        throw new Error("splice() expects only ObservableListItem instances.");
+                                    }
+                                    it.parent = proxy;
+                                });
+
+                                const removed = target._items.splice(start, deleteCount, ...itemsToAdd);
+                                removed.forEach(it => (it.parent = null));
+
+                                // Gửi sự kiện thay đổi
+                                if (removed.length > 0 && itemsToAdd.length === 0) {
+                                    target._notifyCollection({ action: "remove", index: start, items: removed });
+                                } else if (removed.length === 0 && itemsToAdd.length > 0) {
+                                    itemsToAdd.forEach((it, i) =>
+                                        target._notifyCollection({ action: "add", index: start + i, item: it })
+                                    );
+                                } else {
+                                    target._notifyCollection({
+                                        action: "splice",
+                                        index: start,
+                                        removed,
+                                        added: itemsToAdd
+                                    });
+                                }
+
+                                return removed;
+                            };
+                        }
+
+
+                        if (prop === "toPlainArray") {
+                            return () => target._items.map(ObservableListItem.toPlain);
+                        }
+                        if (prop === "parent") return target._parent;
+                        if (prop === "items") return target._items;
+                        if (prop === "notifyCollection") return e => target._notify(e);
+                        return target._items[prop];
+                    }
+                });
+
+                // ✅ set parent đúng proxy cho tất cả item ban đầu
+                this._items.forEach(it => {
+                    if (!(it instanceof ObservableListItem)) {
+                        console.error("Invalid item:", it);
+                        throw new Error("All items in ObservableList must be instances of ObservableListItem.");
+                    }
+                    it.parent = proxy;
+                });
+
+                return proxy;
+            }
+            _notifyCollection(e) { this._listeners.forEach(cb => cb(e)); }
+            _notifyItem(e) { this._itemListeners.forEach(cb => cb(e)); }
+            static serialize(list) {
+                if (!(list instanceof ObservableList)) return [];
+                return list.toPlainArray();
+            }
+            static loadFromPlain(list, dataArray = []) {
+                if (!(list instanceof ObservableList)) return;
+
+                list.splice(0, list.items.length);
+                if (!Array.isArray(dataArray)) return;
+
+                dataArray.forEach(data => {
+                    const item = ObservableListItem.fromPlain(data);
+                    if (item) {
+                        list.push(item);
+                    }
+                });
+            }
+        }
+
+        class ObservableIndexer {
+            constructor(observableList, keyField = "name", recursive = true) {
+                this._keyField = keyField;
+                this._index = new Map();          // key → item
+                this._rootList = observableList;  // root list đang theo dõi
+                this._recursive = recursive;
+
+                // Đăng ký listener
+                observableList.registerListener(e => this._onCollectionChanged(e));
+
+                // Khởi tạo index ban đầu
+                this._buildIndex(observableList);
+            }
+
+            _buildIndex(list) {
+                for (const item of list.items) {
+                    this._tryAdd(item);
+                    if (this._recursive && item.children instanceof ObservableList) {
+                        this._buildIndex(item.children);
+                    }
+                }
+            }
+
+            _onCollectionChanged(e) {
+                if (e.action === "add") {
+                    this._tryAdd(e.item);
+                } else if (e.action === "remove") {
+                    e.items.forEach(it => this._remove(it));
+                } else if (e.action === "splice") {
+                    e.removed.forEach(it => this._remove(it));
+                    e.added.forEach(it => this._tryAdd(it));
+                } else if (e.action === "set") {
+                    this._remove(e.oldItem);
+                    this._tryAdd(e.newItem);
+                }
+
+                // Nếu có children thì cũng cần theo dõi recursive
+                if (this._recursive) {
+                    const items = e.items || [e.item].filter(Boolean);
+                    items.forEach(it => {
+                        if (it.children instanceof ObservableList) {
+                            it.children.registerListener(ev => this._onCollectionChanged(ev));
+                            this._buildIndex(it.children);
                         }
                     });
-                    this.appendChild(input);
                 }
             }
 
-            // getter/setter để dùng như <input>
-            get value() {
-                return this.querySelector("input")?.value;
-            }
-            set value(val) {
-                if (this.querySelector("input")) {
-                    this.querySelector("input").value = val;
+            _tryAdd(item) {
+                const key = item[this._keyField];
+                if (key == null) return;
+                this._index.set(key, item);
+
+                // Theo dõi rename động (nếu có setter trigger)
+                if (Object.getOwnPropertyDescriptor(Object.getPrototypeOf(item), this._keyField) == null) {
+                    // nếu chưa có getter/setter thì thêm dynamic watcher
+                    let val = key;
+                    Object.defineProperty(item, this._keyField, {
+                        get() { return val; },
+                        set: newVal => {
+                            const oldVal = val;
+                            val = newVal;
+                            this._onItemKeyChanged(item, oldVal, newVal);
+                        },
+                        configurable: true,
+                        enumerable: true,
+                    });
                 }
             }
+
+            _remove(item) {
+                const key = item[this._keyField];
+                if (key != null && this._index.get(key) === item) {
+                    this._index.delete(key);
+                }
+                if (this._recursive && item.children instanceof ObservableList) {
+                    for (const child of item.children.items) {
+                        this._remove(child);
+                    }
+                }
+            }
+
+            _onItemKeyChanged(item, oldKey, newKey) {
+                if (this._index.get(oldKey) === item) this._index.delete(oldKey);
+                this._index.set(newKey, item);
+            }
+
+            // API public
+            get(key) { return this._index.get(key) || null; }
+            has(key) { return this._index.has(key); }
+            delete(key) { return this._index.delete(key); }
+            keys() { return Array.from(this._index.keys()); }
+            values() { return Array.from(this._index.values()); }
+            entries() { return Array.from(this._index.entries()); }
+        }
+
+    </script>
+    <script des="views">
+
+        class ParamListView extends HTMLElement {
+            static TAGS = {
+                item_template: "template",
+                param_list: "param-list"
+            };
+            static CLASSES = {
+                item: "param-item",
+                groupBlock: "group-block",
+                groupHeader: "group-header",
+                groupChildren: "group-children",
+            };
+            constructor() {
+                super();
+                this._data = null;
+                this._itemElems = new Map();
+                this._onCollectionChanged = this.onCollectionChanged.bind(this);
+            }
+
+
+            set data(list) {
+                if (this._data) this._data.unregisterListener(this._onCollectionChanged);
+                this._data = list;
+                if (list) list.registerListener(this._onCollectionChanged);
+                this.renderAll();
+            }
+            get data() { return this._data; }
+
+            get rootView() {
+                return this._rootView || this; // fallback về chính nó nếu chưa có
+            }
+            set rootView(v) {
+                this._rootView = v;
+            }
+            get itemElems() {
+                return this.rootView._itemElems
+            }
+
+            renderAll() {
+                const C = ParamListView.CLASSES;
+                const T = ParamListView.TAGS;
+
+                this.querySelectorAll(`.${C.item}, .${C.groupBlock}`).forEach(el => el.remove());
+                if (this === this.rootView) {
+                    this._itemElems.clear();
+                }
+
+                if (!this._data) return;
+                const template = this.querySelector(T.item_template);
+                if (!template) return;
+
+                this._data.items.forEach(p => {
+                    const elem = this._createItemElement(p);
+                    this.appendChild(elem);
+                    this.itemElems.set(p, elem);
+                });
+            }
+
+            onCollectionChanged(e) {
+                console.log("onCollectionChanged:", { e });
+                switch (e.action) {
+                    case "add":
+                        this._handleAdd(e);
+                        break;
+
+                    case "remove":
+                        this._handleRemove(e);
+                        break;
+
+                    case "set":
+                        this._handleSet(e);
+                        break;
+
+                    case "splice":
+                        this._handleSplice(e);
+                        break;
+                }
+            }
+
+            _isAncestor(ancestor, node) {
+                if (!ancestor || !node || ancestor === node) return false;
+
+                let current = node.parent;
+                while (current) {
+                    if (current === ancestor) return true;
+                    // Nếu current là ObservableList thì nhảy tiếp lên cha của list đó (nếu có)
+                    if (current.parent) {
+                        current = current.parent;
+                    } else {
+                        // current là item nhưng không có parent list
+                        break;
+                    }
+                }
+                return false;
+            }
+
+
+            _getItemElements() {
+                const C = ParamListView.CLASSES;
+                return Array.from(this.children).filter(
+                    el => el.classList.contains(C.item) || el.classList.contains(C.groupBlock)
+                );
+            }
+
+            _handleAdd(e) {
+                const elem = this._createItemElement(e.item);
+                const itemElems = this._getItemElements();
+                const refElem = itemElems[e.index];
+                if (refElem) this.insertBefore(elem, refElem);
+                else this.appendChild(elem);
+                this.itemElems.set(e.item, elem);
+            }
+
+            _handleRemove(e) {
+                // e.items có thể là mảng item bị xoá
+                const removedItems = e.items || (e.item ? [e.item] : []);
+                removedItems.forEach(item => {
+                    const elem = this.itemElems.get(item);
+                    if (elem) {
+                        elem.remove();
+                        this.itemElems.delete(item);
+                    }
+                });
+            }
+
+            _handleSet(e) {
+                const oldElem = this.itemElems.get(e.oldItem);
+                if (oldElem) {
+                    const newElem = this._createItemElement(e.newItem);
+                    oldElem.replaceWith(newElem);
+                    this.itemElems.delete(e.oldItem);
+                    this.itemElems.set(e.newItem, newElem);
+                }
+            }
+
+            /**
+             * e = { action: "splice", index, removed, added }
+             */
+            _handleSplice(e) {
+                // 1️⃣ Xóa phần tử cũ (nếu có)
+                if (Array.isArray(e.removed)) {
+                    e.removed.forEach(item => {
+                        const el = this.itemElems.get(item);
+                        if (el) {
+                            el.remove();
+                            this.itemElems.delete(item);
+                        }
+                    });
+                }
+
+                // 2️⃣ Thêm phần tử mới (nếu có)
+                if (Array.isArray(e.added)) {
+                    e.added.forEach((item, i) => {
+                        const elem = this._createItemElement(item);
+
+                        // xác định phần tử tham chiếu
+                        const nextItem = this._data.items[e.index + i + 1];
+                        const refElem = nextItem ? this.itemElems.get(nextItem) : null;
+
+                        if (refElem) this.insertBefore(elem, refElem);
+                        else this.appendChild(elem);
+
+                        this.itemElems.set(item, elem);
+                    });
+                }
+            }
+
+            _createItemElement(itemData) {
+                const C = ParamListView.CLASSES;
+                const T = ParamListView.TAGS;
+                // --- group ---
+                if (itemData.children) {
+                    const groupBlock = document.createElement("div");
+                    groupBlock.className = C.groupBlock;
+
+                    const header = document.createElement("div");
+                    header.className = C.groupHeader;
+                    header.textContent =
+                        (itemData.expanded ? "▼ " : "▶ ") + itemData.name + " (Group)";
+                    groupBlock.appendChild(header);
+
+                    const childrenContainer = document.createElement("div");
+                    childrenContainer.className = C.groupChildren;
+                    childrenContainer.style.display = itemData.expanded ? "block" : "none";
+
+                    const childList = document.createElement(T.param_list);
+                    childList.innerHTML = this.querySelector(T.item_template).outerHTML;
+                    childList.rootView = this.rootView ?? this;
+                    childList.data = itemData.children;
+                    childrenContainer.appendChild(childList);
+                    groupBlock.appendChild(childrenContainer);
+
+                    // toggle expand/collapse
+                    header.addEventListener("click", () => {
+                        itemData.expanded = !itemData.expanded;
+                        childrenContainer.style.display = itemData.expanded ? "block" : "none";
+                        header.textContent =
+                            (itemData.expanded ? "▼ " : "▶ ") + itemData.name + " (Group)";
+                        this._emitEvent("grouptoggle", { group: itemData, expanded: itemData.expanded });
+                    });
+
+                    // drag/drop
+                    this._attachDragDrop(header, itemData);
+                    this._attachItemEvents(header, itemData);
+                    return groupBlock;
+                }
+
+                // --- item thường ---
+                const template = this.querySelector(T.item_template);
+                const fragment = template.content.cloneNode(true);
+
+                this._bindFragmentToItem(fragment, itemData);
+
+                const container = document.createElement("div");
+                container.appendChild(fragment);
+                const elem = container.firstElementChild;
+                elem.classList.add(C.item);
+
+                this._attachDragDrop(elem, itemData);
+                this._attachItemEvents(elem, itemData);
+                return elem;
+            }
+
+            _attachDragDrop(elem, itemData) {
+                const root = this.rootView ?? this;
+                elem.draggable = true;
+
+                function isAbleToDrop(listView, fromNode, toNode) {
+                    return listView._isAncestor(fromNode, toNode)
+                }
+                elem.addEventListener("dragstart", e => {
+                    e.stopPropagation();
+                    e.dataTransfer.effectAllowed = "move";
+                    root._draggingItem = itemData;
+                    elem.classList.add("dragging");
+                    console.log("dragstart:", itemData.name);
+                });
+
+                elem.addEventListener("dragend", e => {
+                    elem.classList.remove("dragging");
+                    root._draggingItem = null;
+                });
+
+                elem.addEventListener("dragover", e => {
+                    e.preventDefault();
+                    const fromItem = root._draggingItem;
+                    const toItem = itemData;
+                    if (this._isAncestor(fromItem, toItem)) {
+                        return;
+                    }
+                    elem.style.borderTop = "2px solid blue";
+                });
+
+                elem.addEventListener("dragleave", e => {
+                    elem.style.borderTop = "";
+                });
+
+                elem.addEventListener("drop", e => {
+                    e.preventDefault();
+                    elem.style.borderTop = "";
+
+                    const fromItem = root._draggingItem;
+                    const toItem = itemData;
+                    console.log("drop:", { toItem, fromItem });
+
+                    if (!fromItem || fromItem === toItem) return;
+                    if (this._isAncestor(fromItem, toItem)) {
+                        return;
+                    }
+                    const fromList = fromItem.parent;
+                    const toList = toItem.parent;
+                    if (!fromList || !toList) return;
+
+                    const fromIndex = fromList.items.indexOf(fromItem);
+                    const toIndex = toList.items.indexOf(toItem);
+                    if (fromIndex === -1 || toIndex === -1) return;
+
+                    console.log(`drop ${fromItem.name} → ${toItem.name}`);
+
+                    const [moved] = fromList.splice(fromIndex, 1);
+                    const adjustedIndex =
+                        fromList === toList && fromIndex < toIndex ? toIndex - 1 : toIndex;
+
+                    toList.splice(adjustedIndex, 0, moved);
+                });
+            }
+
+            _bindFragmentToItem(fragment, itemData) {
+                const bindings = []; // danh sách liên kết { key, node, type, attrName? }
+
+                // 1️⃣ Text nodes
+                const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT, null, false);
+                while (walker.nextNode()) {
+                    const node = walker.currentNode;
+                    const matches = node.textContent.match(/{{\s*([\w]+)\s*}}/g);
+                    if (matches) {
+                        matches.forEach(m => {
+                            const key = m.replace(/[{}]/g, "").trim();
+                            if (itemData[key] !== undefined) {
+                                // render ban đầu
+                                node.textContent = node.textContent.replace(m, itemData[key]);
+                                // lưu lại binding
+                                bindings.push({ key, node, type: "text" });
+                            }
+                        });
+                    }
+                }
+
+                // 2️⃣ Attributes
+                fragment.querySelectorAll("*").forEach(el => {
+                    for (let attr of el.attributes) {
+                        const m = attr.value.match(/{{\s*([\w]+)\s*}}/);
+                        if (m) {
+                            const key = m[1];
+                            if (itemData[key] !== undefined) {
+                                // render ban đầu
+                                el.setAttribute(attr.name, itemData[key]);
+
+                                // nếu là input.value → tạo 2 chiều
+                                if (attr.name === "value" && el.tagName === "INPUT") {
+                                    el.value = itemData[key];
+                                    el.addEventListener("input", () => {
+                                        console.log("el input changed");
+                                        itemData[key] = el.value; // view → model
+                                    });
+                                }
+
+                                // lưu lại binding (để update khi model đổi)
+                                bindings.push({ key, node: el, type: "attr", attrName: attr.name });
+                            }
+                        }
+                    }
+                });
+
+                // 3️⃣ Khi model thay đổi → update view
+                if (typeof itemData.registerListener === "function") {
+                    itemData.registerListener(e => {
+                        const { field, newValue } = e;
+                        bindings.forEach(b => {
+                            if (b.key === field) {
+                                if (b.type === "text") {
+                                    b.node.textContent = newValue; // update text node
+                                } else if (b.type === "attr") {
+                                    b.node.setAttribute(b.attrName, newValue);
+                                    if (b.attrName === "value" && b.node.tagName === "INPUT") {
+                                        b.node.value = newValue; // model → view
+                                    }
+                                }
+                            }
+                        });
+                    });
+                }
+
+                return bindings;
+            }
+
+            // ==================== EVENT BINDING ====================
+
+            _emitEvent(type, detail) {
+                // Tạo bản sao detail để có thể thêm extraParam sau
+                let eventDetail = { ...detail };
+
+                const event = new CustomEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    composed: true,
+                    detail: eventDetail
+                });
+
+                this.dispatchEvent(event);
+
+                const attrName = "on" + type.toLowerCase();
+                const inlineHandler = this.rootView.getAttribute(attrName);
+
+                if (inlineHandler) {
+                    const match = inlineHandler.match(/^(\w+)\((.*)\)$/);
+                    if (match) {
+                        const fnName = match[1];
+                        const argsStr = match[2].trim();
+
+                        if (window[fnName]) {
+                            let extraParam = null;
+
+                            if (argsStr) {
+                                try {
+                                    extraParam = new Function(`return [${argsStr}]`)();
+                                } catch (e) {
+                                    console.warn("Failed to parse inline params:", e);
+                                }
+                            }
+
+                            // Gắn extraParam vào event.detail mà KHÔNG ghi đè event.detail
+                            event.detail.extraParam = extraParam;
+
+                            window[fnName](event);
+                        }
+                    } else {
+                        if (window[inlineHandler]) {
+                            window[inlineHandler](event);
+                        }
+                    }
+                }
+            }
+
+            _attachItemEvents(elem, itemData) {
+                elem.addEventListener("click", e => {
+                    e.stopPropagation();
+                    this._emitEvent("itemclick", { item: itemData, element: elem });
+                });
+
+                elem.addEventListener("contextmenu", e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this._emitEvent("itemcontextmenu", {
+                        item: itemData,
+                        element: elem,
+                        x: e.clientX,
+                        y: e.clientY
+                    });
+                });
+            }
+
+        }
+
+        class AutoScrollInput extends HTMLElement {
+            constructor() {
+                super();
+                this._input = document.createElement('input');
+                this.appendChild(this._input);
+            }
+            connectedCallback() {
+                if (typeof isMobile !== 'undefined' && isMobile) {
+                    this._input.addEventListener('focus', () => {
+                        setTimeout(() => this._input.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
+                    });
+                }
+            }
+            get value() { return this._input.value; }
+            set value(v) { this._input.value = v; }
         }
 
         class FormattedInput extends AutoScrollInput {
-            connectedCallback() {
-                super.connectedCallback();
-                const input = this.querySelector("input");
+            static get observedAttributes() {
+                return ["value", "format", "min", "max", "step", "spinner", "readonly"];
+            }
+            constructor() {
+                super();
+                this._rawValue = '';
+                this._updating = false; // chống vòng lặp attribute ↔ setter
 
-                const format = this.getAttribute("format") || "";
+                // style nội bộ (không dùng shadow để cho phép CSS var từ host)
+                this._style = document.createElement('style');
+                this._style.textContent = `
+          input {
+            font-size: var(--fi-font-size, 16px);
+            padding: var(--fi-padding, 6px 8px);
+            width: var(--fi-width, 180px);
+            border: 1px solid var(--fi-border-color, #ccc);
+            border-radius: var(--fi-radius, 6px);
+            background: var(--fi-bg, #fff);
+            color: var(--fi-text-color, #222);
+            text-align: right;
+            box-sizing: border-box;
+          }
+          input:focus { outline: none; border-color: var(--fi-focus, #66aaff); box-shadow: 0 0 2px var(--fi-focus, #66aaff); }
+        `;
+                this.appendChild(this._style);
 
-                // set giá trị ban đầu (formatted)
-                if (this.hasAttribute("value")) {
-                    input.value = this.formatValue(this.getAttribute("value"), format);
+                // input mode – mặc định là text để hiển thị chuỗi format; sẽ chuyển sang number khi focus
+                this._input.type = 'text';
+                this._input.inputMode = 'decimal';
+
+                // Hiển thị giá trị đã format lần đầu nếu có attribute value
+                if (this.hasAttribute('value')) {
+                    const num = this._parseToNumber(this.getAttribute('value'));
+                    this._rawValue = isNaN(num) ? '' : num;
+                    this._render();
                 }
 
-                // Khi focus → hiện raw value
-                input.addEventListener("focus", () => {
-                    const raw = this.getAttribute("value");
-                    if (raw !== null) input.value = raw;
+                // focus: hiện raw value + bật spinner nếu cần
+                this._input.addEventListener('focus', () => {
+                    if (this._isReadonly()) return;
+                    this._input.value = this._rawValue ?? '';
+                    if (this._shouldShowSpinner()) {
+                        this._input.type = 'number';
+                        this._applyNumericAttrs();
+                    }
                 });
 
-                // Khi blur → format lại
-                input.addEventListener("blur", () => {
-                    let val = input.value;
-                    let num = parseFloat(val.replace(/[^\d.-]/g, ""));
-                    if (isNaN(num)) num = 0;
-
-                    this.setAttribute("value", num); // update attribute để đồng bộ
-                    input.value = this.formatValue(num, format);
-
-                    // trigger sự kiện custom để cha biết có update
-                    //this.dispatchEvent(new CustomEvent("valueChanged", { detail: { key: this.id, value: num } }));
+                // blur: chuyển về text trước rồi format lại; nếu rỗng, giữ nguyên giá trị cũ
+                this._input.addEventListener('blur', () => {
+                    const current = this._input.value;
+                    this._input.type = 'text';
+                    const val = (current === '' || current == null) ? this._rawValue : current;
+                    this.value = val; // setter sẽ parse & render
                 });
 
-                input.addEventListener("blur", () => {
-                    let val = input.value;
-                    let num = parseFloat(val.replace(/[^\d.-]/g, ""));
-                    if (isNaN(num)) num = 0;
+                // change: bắn sự kiện cho cha biết
+                this._input.addEventListener('change', () => {
+                    if (this._isReadonly()) return;
+                    this._emitChanged();
+                });
 
-                    this.setAttribute("value", num); // update attribute để đồng bộ
-                    input.value = this.formatValue(num, format);
-
-                    // trigger sự kiện custom để cha biết có update
-                    //this.dispatchEvent(new CustomEvent("valueChanged", { detail: { key: this.id, value: num } }));
+                // keyboard ↑↓: hỗ trợ step ngay cả khi type=text
+                this._input.addEventListener('keydown', (e) => {
+                    if (this._isReadonly()) { e.preventDefault(); return; }
+                    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && this._isNumericFormat()) {
+                        e.preventDefault();
+                        const step = this._readNumberAttr('step', 1);
+                        const dir = e.key === 'ArrowUp' ? 1 : -1;
+                        let next = (parseFloat(this._input.value || this._rawValue) || 0) + dir * step;
+                        const min = this._readNumberAttr('min', null);
+                        const max = this._readNumberAttr('max', null);
+                        if (min !== null) next = Math.max(min, next);
+                        if (max !== null) next = Math.min(max, next);
+                        this._input.value = String(next);
+                    }
                 });
             }
 
-            formatValue(val, format) {
-                if (val == null || isNaN(val)) return val;
-                switch (format) {
-                    case "currency":
-                        return new Intl.NumberFormat("vi-VN").format(val) + " VND";
-                    case "decimal":
-                        return new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
-                    case "percent":
-                        return val + " %";
-                    default:
-                        return val;
+            // ===== Formatters =====
+            static FORMATTERS = {
+                number: (v) => {
+                    const n = parseFloat(v); return isNaN(n) ? '' : n.toLocaleString('vi-VN');
+                },
+                currency: (v) => { // VND mặc định
+                    const n = parseFloat(v); return isNaN(n) ? '' : new Intl.NumberFormat('vi-VN').format(n) + ' ₫';
+                },
+                vnd: (v) => FormattedInput.FORMATTERS.currency(v),
+                usd: (v) => {
+                    const n = parseFloat(v); return isNaN(n) ? '' : '$' + n.toLocaleString('en-US');
+                },
+                percent: (v) => {
+                    const n = parseFloat(v); return isNaN(n) ? '' : n.toFixed(2) + '%';
+                },
+                decimal: (v) => {
+                    const n = parseFloat(v); return isNaN(n) ? '' : n.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                },
+            };
+
+            // ===== Public API (properties) =====
+            get value() { return this._rawValue; }
+            set value(v) {
+                const num = this._parseToNumber(v);
+                this._rawValue = isNaN(num) ? '' : num;
+                this._render(true);
+                // đồng bộ attribute value nhưng tránh vòng lặp
+                if (!this._updating) {
+                    this._updating = true;
+                    this.setAttribute('value', String(this._rawValue));
+                    this._updating = false;
                 }
             }
 
-            get value() { return parseFloat(this.getAttribute("value")); }
-            set value(val) {
-                this.setAttribute("value", val);
-                const format = this.getAttribute("format") || "";
-                this.querySelector("input").value = this.formatValue(val, format);
+            get format() { return (this.getAttribute('format') || 'number').toLowerCase(); }
+            set format(v) { this.setAttribute('format', v); }
+
+            // ===== Lifecycle for attributes =====
+            attributeChangedCallback(name, oldVal, newVal) {
+                if (oldVal === newVal) return;
+                if (name === 'value') {
+                    if (!this._updating) this.value = newVal; // sẽ parse + render
+                } else if (name === 'format') {
+                    this._render();
+                } else if (name === 'readonly') {
+                    this._updateReadonly();
+                } else if (name === 'min' || name === 'max' || name === 'step') {
+                    this._applyNumericAttrs();
+                }
+            }
+
+            // ===== Helpers =====
+            _render(initial = false) {
+                const fmt = FormattedInput.FORMATTERS[this.format];
+                if (fmt) this._input.value = fmt(this._rawValue);
+                else this._input.value = this._rawValue;
+                if (!initial) this._updateReadonly();
+            }
+            _parseToNumber(val) {
+                const cleaned = String(val ?? '').replace(/[^0-9eE+\.\-]/g, '');
+                return parseFloat(cleaned);
+            }
+            _isReadonly() { return this.hasAttribute('readonly'); }
+            _updateReadonly() {
+                if (this._isReadonly()) this._input.setAttribute('readonly', 'true');
+                else this._input.removeAttribute('readonly');
+            }
+            _isNumericFormat() { return ['number', 'currency', 'vnd', 'usd', 'percent', 'decimal'].includes(this.format); }
+            _shouldShowSpinner() { const a = (this.getAttribute('spinner') || 'on').toLowerCase(); return this._isNumericFormat() && a !== 'off'; }
+            _applyNumericAttrs() {
+                if (this._input.type !== 'number') return;
+                const min = this.getAttribute('min');
+                const max = this.getAttribute('max');
+                const step = this.getAttribute('step');
+                if (min !== null) this._input.min = min; else this._input.removeAttribute('min');
+                if (max !== null) this._input.max = max; else this._input.removeAttribute('max');
+                if (step !== null) this._input.step = step; else this._input.removeAttribute('step');
+            }
+            _readNumberAttr(name, fallback) {
+                const v = this.getAttribute(name);
+                if (v === null || v === '') return fallback;
+                const n = Number(v);
+                return Number.isNaN(n) ? fallback : n;
+            }
+            _emitChanged() {
+                this.dispatchEvent(new CustomEvent('value-changed', { detail: { value: this._rawValue }, bubbles: true, composed: true }));
             }
         }
 
+    </script>
+    <script des="app">
+        // Đăng ký custom tag <auto-scroll-input>
+        customElements.define("auto-scroll-input", AutoScrollInput);
+        customElements.define("formatted-input", FormattedInput);
+        customElements.define(ParamListView.TAGS.param_list, ParamListView);
+    </script>
+    <script des="controller">
 
         //#region View function
+        function toggleBlock(id) {
+            const el = document.getElementById(id);
+            const title = el.previousElementSibling; // h3
+            if (el.style.display === "none") {
+                el.style.display = "block";
+                title.innerText = title.innerText.replace("➕", "➖");
+            } else {
+                el.style.display = "none";
+                title.innerText = title.innerText.replace("➖", "➕");
+            }
+        }
+
         function toggleFullscreen() {
             const btn = document.getElementById("fullscreenBtn");
 
@@ -428,18 +1404,109 @@
             }
         }
 
+        let isRestoring = false;
+
+        function getCurrentWorkspaceData() {
+            return {
+                params: ObservableList.serialize(observableListParams),
+                formulas: ObservableList.serialize(observableListFormulas)
+            };
+        }
+
+        function normalizeParamData(raw) {
+            if (Array.isArray(raw)) return raw;
+            if (!raw || typeof raw !== "object") return [];
+            return Object.entries(raw).map(([name, value]) => {
+                if (value && typeof value === "object" && !Array.isArray(value)) {
+                    return { name, ...value };
+                }
+                return { name, value };
+            });
+        }
+
+        function normalizeFormulaData(raw) {
+            if (Array.isArray(raw)) return raw;
+            if (!raw || typeof raw !== "object") return [];
+            return Object.entries(raw).map(([name, value]) => {
+                if (value && typeof value === "object" && !Array.isArray(value)) {
+                    return { name, ...value };
+                }
+                return { name, raw: value, display: value };
+            });
+        }
+
+        function traverseList(list, callback) {
+            if (!(list instanceof ObservableList)) return;
+            list.items.forEach(item => {
+                callback(item);
+                if (item.children instanceof ObservableList) {
+                    traverseList(item.children, callback);
+                }
+            });
+        }
+
+        function ensureParamListeners(item) {
+            if (!item || item.children instanceof ObservableList) {
+                return;
+            }
+            if (item._paramListenersAttached) return;
+
+            item.registerListener(e => {
+                const { field, newValue, oldValue } = e;
+                if (field === "value" && newValue !== oldValue) {
+                    updateFormulaResults();
+                }
+                persistWorkspace();
+            });
+
+            item.registerBeforeValueChangedListener(e => {
+                if (e.field === "value") {
+                    const parsed = parseFloat(e.newValue);
+                    return isNaN(parsed) ? 0 : parsed;
+                }
+                return e.newValue;
+            });
+
+            item._paramListenersAttached = true;
+        }
+
+        function persistWorkspace() {
+            if (isRestoring) return;
+            saveToLocal();
+        }
+
+        function restoreWorkspace(data) {
+            isRestoring = true;
+            try {
+                const normalizedParams = normalizeParamData(data?.params);
+                const normalizedFormulas = normalizeFormulaData(data?.formulas);
+
+                ObservableList.loadFromPlain(observableListParams, normalizedParams);
+                ObservableList.loadFromPlain(observableListFormulas, normalizedFormulas);
+
+                editingParamKey = null;
+                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+                editingFormulaKey = null;
+                document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
+
+                traverseList(observableListParams, ensureParamListeners);
+                updateFormulaResults();
+            } finally {
+                isRestoring = false;
+            }
+
+            persistWorkspace();
+        }
+
         function exportData() {
             // Hỏi tên file
             let filename = prompt("Nhập tên file để lưu:", "pt-data");
             if (filename === null) return; // user bấm Cancel
             filename = filename.trim() || "pt-data"; // nếu bỏ trống thì lấy mặc định
 
-            // Gom dữ liệu
-            const data = {
-                params: params,
-                formulas: formulas
-            };
-            saveToLocal(data)
+            const data = getCurrentWorkspaceData();
+            saveToLocal(data);
+
             // Tạo file JSON
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
@@ -458,11 +1525,7 @@
             reader.onload = (e) => {
                 try {
                     const data = JSON.parse(e.target.result);
-                    params = data.params || {};
-                    formulas = data.formulas || {};
-                    renderParams();
-                    renderFormulas();
-                    updateFormulaResults();
+                    restoreWorkspace(data);
                     alert("Import dữ liệu thành công!");
                 } catch (err) {
                     alert("File không hợp lệ: " + err.message);
@@ -561,29 +1624,28 @@
                 { icon: "❌", label: "Delete", action: (name) => deleteFormula(name) }
             ]
         };
-
-        function openContextMenu(e, type, name) {
-            e.preventDefault();
-            currentType = type;
-            currentName = name;
-
+        function handleContextMenu(e) {
+            const { item, x, y, extraParam } = e.detail;
+            console.log("🟠 Context menu:", item.name, x, y);
+            const type = extraParam[0]
+            const itemName = item.name
             // Build menu items theo type
             menu.innerHTML = MENU_ACTIONS[type]
                 .map(item => `
-      <div class="context-menu-item" onclick="handleContext('${item.label}')">
+      <div class="context-menu-item" onclick="handleContext('${item.label}', '${type}', '${itemName}')">
         ${item.icon} ${item.label}
       </div>
     `).join("");
 
             menu.style.display = "block";
-            menu.style.left = e.pageX + "px";
-            menu.style.top = e.pageY + "px";
+            menu.style.left = x + "px";
+            menu.style.top = y + "px";
         }
 
-        function handleContext(label) {
-            if (!currentType || !currentName) return;
-            const item = MENU_ACTIONS[currentType].find(x => x.label === label);
-            if (item) item.action(currentName);
+        function handleContext(label, type, itemName) {
+            if (!type || !itemName) return;
+            const item = MENU_ACTIONS[type].find(x => x.label === label);
+            if (item) item.action(itemName);
             menu.style.display = "none";
         }
 
@@ -593,22 +1655,29 @@
         //#endregion 
 
         //#region Param
-        let params = {};
-        let editingParamName = null;
+        const observableListParams = new ObservableList([]);
+        const paramIndexer = new ObservableIndexer(observableListParams, "name");
 
-        function editParam(name) {
-            const p = params[name];
+        const paramsView = document.getElementById("paramsView");
+        paramsView.data = observableListParams;
+
+        let editingParamKey = null;
+
+        function editParam(key) {
+            p = paramIndexer.get(key);
             if (!p) return;
 
             // Fill input
-            document.getElementById("paramName").value = name;
+            document.getElementById("paramName").value = key;
             document.getElementById("paramValue").value = p.value;
-            document.getElementById("paramGroup").value = p.group;
+            if (p.groupName) {
+                document.getElementById("paramGroup").value = p.groupName;
+            }
             document.getElementById("paramColor").value = p.color;
             document.getElementById("paramDesc").value = p.desc || "";
             document.getElementById("paramFormat").value = p.format;
             document.getElementById("addParamButton").innerHTML = "Cập nhật";
-            editingParamName = name; // đánh dấu đang edit
+            editingParamKey = key; // đánh dấu đang edit
         }
 
         function addParam() {
@@ -622,160 +1691,67 @@
             if (!name) { alert("Tên param không được rỗng!"); return; }
             if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
 
-            if (editingParamName) {
-                delete params[editingParamName];
-                editingParamName = null;
+
+            if (paramIndexer.has(name) && editingParamKey == null) {
+                alert(`Param ${name} đã tồn tại!`); return;
             }
 
-            params[name] = { value, desc, group, color, format };
+            if (editingParamKey) {
+                oldItem = paramIndexer.get(editingParamKey);
+                oldGroupName = oldItem.groupName;
+                oldItem.name = name;
+                oldItem.value = value;
+                oldItem.desc = desc;
+                oldItem.format = format;
+                editingParamKey = null;
+                if (group != '' && group != oldGroupName) {
+                    if (oldItem.parent) {
+                        oldItem.parent.remove(oldItem);
+                    }
+                    newGroup = observableListParams.addNewGroup(group);
+                    newGroup.children.push(oldItem);
+                    oldItem.groupName = group;
+                }
+                document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+            } else {
+                const newItem = new ObservableListItem({
+                    name,
+                    value,
+                    desc,
+                    color,
+                    format
+                });
+                observableListParams.addToGroup(group, newItem);
+                ensureParamListeners(newItem);
+            }
 
-            renderParams();
-            updateFormulaResults();
-            saveToLocal({
-                params: params,
-                formulas: formulas
-            });
-
-            // reset input
             document.getElementById("paramName").value = "";
             document.getElementById("paramValue").value = "";
             document.getElementById("paramDesc").value = "";
             document.getElementById("paramGroup").value = "";
             document.getElementById("paramColor").value = "#f0f0f0";
-        }
 
-
-        function toggleBlock(id) {
-            const el = document.getElementById(id);
-            const title = el.previousElementSibling; // h3
-            if (el.style.display === "none") {
-                el.style.display = "block";
-                title.innerText = title.innerText.replace("➕", "➖");
-            } else {
-                el.style.display = "none";
-                title.innerText = title.innerText.replace("➖", "➕");
-            }
+            persistWorkspace();
         }
 
         function deleteParam(key) {
-            delete params[key];
-            renderParams();
+            param = paramIndexer.get(key);
+            if (param) {
+                param.parent.remove(param);
+            }
             updateFormulaResults();
-        }
-
-        // Render danh sách param với input để chỉnh sửa realtime
-        let groupState = {}; // Lưu trạng thái expand/collapse của từng group
-
-        function renderParams() {
-            const paramsContainer = document.getElementById("params");
-            paramsContainer.innerHTML = ""; // clear cũ
-
-            const title = document.createElement("h4");
-            title.innerText = "Danh sách tham số:";
-            paramsContainer.appendChild(title);
-
-            // Gom param theo group
-            let grouped = {};
-            for (let key in params) {
-                let p = params[key];
-                let g = p.group || "Ungrouped";
-                if (!grouped[g]) grouped[g] = [];
-                grouped[g].push({ name: key, ...p });
-            }
-
-            for (let g in grouped) {
-                if (!(g in groupState)) groupState[g] = true; // mặc định expand
-
-                const groupDiv = document.createElement("div");
-                groupDiv.className = "param-group";
-
-                // header
-                const header = document.createElement("div");
-                header.className = "group-header";
-                header.innerHTML = `${groupState[g] ? "▼" : "▶"} <b>${g}</b>`;
-                header.addEventListener("click", () => toggleGroup(g));
-                groupDiv.appendChild(header);
-
-                // container
-                const groupContainer = document.createElement("div");
-                groupContainer.id = `group-${g}`;
-                groupContainer.style.display = groupState[g] ? "block" : "none";
-                groupContainer.style.marginLeft = "15px";
-                groupDiv.appendChild(groupContainer);
-
-                // từng param
-                grouped[g].forEach(p => {
-                    const item = document.createElement("div");
-                    item.className = "param-item list-item";
-                    item.style.setProperty("--list-item-bg", p.color || "#fafafa");
-                    item.addEventListener("contextmenu", e => openContextMenu(e, "param", p.name));
-
-                    const inner = document.createElement("div");
-
-                    // label + input
-                    const label = document.createTextNode(`${p.name} = `);
-                    inner.appendChild(label);
-
-                    const input = document.createElement("input");
-                    input.type = "text";
-                    input.value = formatValue(p.value, p.format);
-
-                    input.addEventListener("focus", () => {
-                        console.log("onFocus");
-                        input.value = p.value; // raw value
-                    });
-                    input.addEventListener("blur", () => {
-                        console.log("onBlur");
-                        updateParamFormatted(p.name, input.value);
-                    });
-                    input.addEventListener("change", () => {
-                        console.log("onChange");
-                        if (params[p.name]) {
-                            params[p.name].value = parseFloat(input.value) || 0;
-                            updateFormulaResults();
-                        }
-                    });
-
-                    inner.appendChild(input);
-
-                    // description
-                    const desc = document.createElement("div");
-                    desc.style.fontSize = "12px";
-                    desc.style.color = "#333";
-                    desc.innerText = p.desc || "";
-                    inner.appendChild(desc);
-
-                    item.appendChild(inner);
-                    groupContainer.appendChild(item);
-                });
-
-                paramsContainer.appendChild(groupDiv);
-            }
-        }
-
-
-        function updateParamFormatted(key, val) {
-            console.log("updateParamFormatted");
-            // loại bỏ ký tự không phải số trước
-            let num = parseFloat(val.replace(/[^\d.-]/g, ""));
-            if (isNaN(num)) num = 0;
-            if (params[key]) {
-                params[key].value = num;
-                renderParams();
-                updateFormulaResults();
-            }
-        }
-
-        function toggleGroup(g) {
-            groupState[g] = !groupState[g];
-            renderParams();
+            persistWorkspace();
         }
 
         //#endregion
 
         //#region Formula
-        let formulas = {};   // key = tên công thức, value = { raw, display }
-        let editingFormulaName = null;
+        const observableListFormulas = new ObservableList([]);
+        const formulaIndexer = new ObservableIndexer(observableListFormulas, "name");
+
+        const formulasView = document.getElementById("formulasView");
+        formulasView.data = observableListFormulas;
+        let editingFormulaKey = null;
 
         // Format công thức: thêm khoảng trắng và đổi * thành ×
         function formatFormulaDisplay(formula) {
@@ -787,74 +1763,93 @@
                 .trim();
         }
 
-        function deleteFormula(name) {
-            delete formulas[name];
-            renderFormulas();
+        function deleteFormula(key) {
+            formula = formulaIndexer.get(key);
+            if (formula) {
+                formula.parent.remove(formula);
+            }
             updateFormulaResults();
+            persistWorkspace();
         }
 
-        function editFormula(name) {
-            const f = formulas[name];
-            if (!f) return;
+        function editFormula(key) {
+            p = formulaIndexer.get(key);
+            if (!p) return;
 
-            document.getElementById("formulaName").value = name;
-            document.getElementById("formulaInput").value = f.raw;
-            document.getElementById("formulaDesc").value = f.desc || "";
-
-            editingFormulaName = name;
+            // Fill input
+            document.getElementById("formulaName").value = key;
+            document.getElementById("formulaDesc").value = p.desc;
+            if (p.groupName) {
+                document.getElementById("formulaGroup").value = p.groupName;
+            }
+            document.getElementById("formulaInput").value = p.raw;
+            document.getElementById("addFormulaButton").innerHTML = "Cập nhật";
+            editingFormulaKey = key; // đánh dấu đang edit
         }
 
         function addFormula() {
-            const name = document.getElementById("formulaName").value.trim() || `C${Object.keys(formulas).length + 1}`;
+            const nameInput = document.getElementById("formulaName").value.trim();
+            let name = nameInput;
+            if (!name) {
+                let counter = 1;
+                do {
+                    name = `C${counter++}`;
+                } while (formulaIndexer.has(name));
+            }
             const formula = document.getElementById("formulaInput").value.trim();
             const desc = document.getElementById("formulaDesc").value.trim();
+            const group = document.getElementById("formulaGroup").value.trim();
 
             if (!formula) { alert("Chưa nhập công thức!"); return; }
 
-            // Nếu đang edit → xóa công thức cũ
-            if (editingFormulaName) {
+            if (formulaIndexer.has(name) && editingFormulaKey == null) {
+                alert(`Công thức ${name} đã tồn tại!`); return;
+            }
+            if (editingFormulaKey) {
+                oldItem = formulaIndexer.get(editingFormulaKey);
+                oldGroupName = oldItem.groupName;
+                oldItem.name = name;
+                oldItem.raw = formula;
+                oldItem.desc = desc;
+                oldItem.display = formula;
+                editingFormulaKey = null;
+                if (group != '' && group != oldGroupName) {
+                    if (oldItem.parent) {
+                        oldItem.parent.remove(oldItem);
+                    }
+                    newGroup = observableListFormulas.addNewGroup(group);
+                    newGroup.children.push(oldItem);
+                    oldItem.groupName = group;
+                }
                 document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
-                delete formulas[editingFormulaName];
-                editingFormulaName = null;
+            } else {
+                const newItem = new ObservableListItem({
+                    name: name,
+                    raw: formula,
+                    desc: desc,
+                    display: formula,
+                    result: "1"
+                });
+
+                observableListFormulas.addToGroup(group, newItem);
             }
 
-            formulas[name] = {
-                raw: formula,
-                display: formatFormulaDisplay(formula),
-                desc: desc
-            };
-
-            renderFormulas();
             updateFormulaResults();
 
             document.getElementById("formulaName").value = "";
             document.getElementById("formulaInput").value = "";
             document.getElementById("formulaDesc").value = "";
-        }
+            document.getElementById("formulaGroup").value = "";
 
-        // Render danh sách công thức
-        function renderFormulas() {
-            let html = "<h4>Danh sách công thức:</h4>";
-            for (let [name, f] of Object.entries(formulas)) {
-                html += `
-      <div class="formula-item list-item" 
-            oncontextmenu="openContextMenu(event, 'formula', '${name}')"
-            style="--list-item-bg:${'#dddddd'};">
-        <div>
-          <span><b>${name}</b>: <span id="formulaDisplay_${name}">${f.display}</span></span>
-          <span id="formulaResult_${name}" class="formula-result"></span>
-          <div style="font-size:12px; color:#666;">${f.desc || ""}</div>
-        </div>
-      </div>`;
-            }
-            document.getElementById("formulas").innerHTML = html;
+            persistWorkspace();
         }
 
         // Tính toán lại tất cả công thức
         function updateFormulaResults() {
             let scope = {};
             // 1) Map params -> scope (lấy field value nếu là object)
-            for (let [k, v] of Object.entries(params)) {
+            for (let [k, v] of paramIndexer.entries()) {
+                if (v && v.children instanceof ObservableList) continue;
                 scope[k] = (v && typeof v === "object" && "value" in v) ? v.value : v;
             }
 
@@ -887,7 +1882,8 @@
             // Tập tên “được phép” để không bị highlight thiếu
             const ALLOWED_NAMES = new Set([...Object.keys(scope), "Math"]);
 
-            for (let [name, f] of Object.entries(formulas)) {
+            for (let [name, f] of formulaIndexer.entries()) {
+                if (f && f.children instanceof ObservableList) continue;
                 try {
                     let keys = Object.keys(scope);
                     let values = Object.values(scope);
@@ -898,10 +1894,8 @@
 
                     // Lưu kết quả vào scope để các công thức sau có thể dùng tiếp
                     scope[name] = result;
-
+                    formulaIndexer.get(name)['result'] = result;
                     // Render UI
-                    document.getElementById("formulaResult_" + name).innerText = " = " + result;
-                    document.getElementById("formulaDisplay_" + name).innerHTML = f.display;
 
                 } catch (e) {
                     // Bắt tên biến/hàm trong raw
@@ -933,16 +1927,19 @@
         function clearWorkspace() {
             if (!confirm("Bạn có chắc muốn xoá toàn bộ Param và Formula hiện tại không?")) return;
 
-            params = {};
-            formulas = {};
-            renderParams();
-            renderFormulas();
+            observableListParams.splice(0, observableListParams.items.length);
+            observableListFormulas.splice(0, observableListFormulas.items.length);
+            editingParamKey = null;
+            document.getElementById("addParamButton").innerHTML = "Thêm tham số";
+            editingFormulaKey = null;
+            document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
             updateFormulaResults();
-            saveToLocal({ params, formulas }); // clear cả localStorage luôn
+            persistWorkspace();
         }
 
-        function saveToLocal(data) {
-            localStorage.setItem("pt-latest-data", JSON.stringify(data));
+        function saveToLocal(data = null) {
+            const payload = data || getCurrentWorkspaceData();
+            localStorage.setItem("pt-latest-data", JSON.stringify(payload));
         }
 
         // Load khi mở page
@@ -951,11 +1948,7 @@
             if (!raw) return;
             try {
                 const data = JSON.parse(raw);
-                params = data.params || {};
-                formulas = data.formulas || {};
-                renderParams();
-                renderFormulas();
-                updateFormulaResults();
+                restoreWorkspace(data);
             } catch (e) {
                 console.error("Không load được dữ liệu local:", e);
             }
@@ -963,12 +1956,21 @@
 
         // Gọi khi page khởi động
         window.addEventListener("DOMContentLoaded", loadFromLocal);
-        // Đăng ký custom tag <auto-scroll-input>
-        customElements.define("auto-scroll-input", AutoScrollInput);
-        customElements.define("formatted-input", FormattedInput);
 
-        // Chèn saveToLocal() vào cuối addParam, addFormula, deleteParam, deleteFormula
 
+        // Lưu trạng thái workspace đã được xử lý trong persistWorkspace()
+
+    </script>
+    <script>
+        function handleItemClick(e) {
+            const { item } = e.detail;
+            // alert("🟢 Clicked: " + item.name);
+        }
+
+        function handleGroupToggle(e) {
+            const { group, expanded } = e.detail;
+            // console.log(`📂 Group ${group.name} is now ${expanded ? "expanded" : "collapsed"}`);
+        }
     </script>
 </body>
 

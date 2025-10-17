@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <meta charset="UTF-8">
+    <title>Param Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="theme-color" content="#000000">
+    <style>
+        body {
+            font-family: 'Inter', 'Roboto', sans-serif;
+            font-size: 14px;
+            color: #333;
+            padding: 20px;
+            margin: auto;
+        }
+
+        h2,
+        h3 {
+            text-align: center;
+        }
+
+        /* #region list-item*/
+        /* Param và Formula item chung */
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px;
+            border-radius: 4px;
+            margin: 3px 0;
+            background: var(--list-item-bg, #fafafa);
+            /* default màu */
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        .list-item:hover {
+            background: #f5faff;
+        }
+
+        .list-item:active {
+            background: #dbe9ff;
+            transform: scale(0.98);
+        }
+
+        /* Khi long-press (dành cho mobile, thêm class .long-press bằng JS) */
+        .list-item.long-press {
+            background: #ffe8cc;
+            /* cam nhạt */
+        }
+
+
+        /* #endregion */
+        .block {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .scroll-box {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 5px;
+            margin-top: 10px;
+            border-radius: 4px;
+            background: #fafafa;
+        }
+
+        label {
+            display: block;
+            margin-top: 5px;
+        }
+
+        input {
+            padding: 5px;
+            margin: 3px 0;
+        }
+
+        button {
+            margin-top: 10px;
+            padding: 6px 12px;
+        }
+
+        .formula-result {
+            font-weight: bold;
+            color: darkblue;
+        }
+
+        .group-header {
+            background: #eee;
+            padding: 5px;
+            margin-top: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .group-header:hover {
+            background: #ddd;
+        }
+
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .menubar {
+            display: flex;
+            gap: 10px;
+            background: #f0f0f0;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            align-items: center;
+        }
+
+        /* Style nút */
+        .menubar button,
+        .menubar .menu-btn {
+            margin: 2px;
+            background: #ffffff;
+            border: 1px solid #bbb;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+
+        /* Hover effect */
+        .menubar button:hover,
+        .menubar .menu-btn:hover {
+            background: #e6f0ff;
+            box-shadow: 0 0 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .context-menu {
+            position: absolute;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-width: 120px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            display: none;
+            z-index: 1000;
+        }
+
+        .context-menu-item {
+            padding: 6px 10px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .context-menu-item:hover {
+            background: #f0f0f0;
+        }
+
+        /* Ẩn input file thật, chỉ show label giả nút */
+        #importFile {
+            display: none;
+        }
+
+        .formula-block {
+            flex: 1;
+            /* tự chiếm phần còn lại */
+        }
+
+        .mouse-effect-no-select {
+            user-select: none;
+            /* chuẩn */
+            -webkit-user-select: none;
+            /* Safari/Chrome */
+            -ms-user-select: none;
+            /* IE/Edge cũ */
+        }
+
+        /* Khi xoay ngang (chiều rộng > chiều cao) thì đổi layout ngang */
+        /* Mobile thường có pointer: coarse (ngón tay), còn PC là fine (chuột) */
+        @media (orientation: landscape) {
+            .container {
+                display: flex;
+                flex-direction: row;
+                height: 100%;
+                gap: 0px;
+            }
+
+            .divider {
+                width: 30px;
+                cursor: col-resize;
+                background: #ddd;
+            }
+
+            .divider:hover {
+                background: #aaa;
+            }
+
+            .param-block {
+                min-width: 30%;
+                max-width: 60%;
+            }
+        }
+
+        @media (orientation: landscape) and (pointer: coarse) {
+            .container {
+                display: flex;
+                flex-direction: row;
+                height: 100%;
+                gap: 0px;
+            }
+
+            .divider {
+                width: 10px;
+                cursor: col-resize;
+                background: #ddd;
+            }
+
+            .divider:hover {
+                background: #aaa;
+            }
+
+            .param-block {
+                min-width: 30%;
+                max-width: 60%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Param Editor</h2>
+    <div class="menubar">
+        <button onclick="exportData()">💾 Export</button>
+
+        <label for="importFile" class="menu-btn">📂 Import</label>
+        <input type="file" id="importFile" accept=".json" onchange="importData(this)">
+        <button onclick="clearWorkspace()">🧹 Clear</button>
+        <button onclick="toggleFullscreen()">🔳 Toggle Fullscreen</button>
+
+    </div>
+    <div class="container" id="mainContainer">
+        <!-- Thêm tham số -->
+        <div class="block param-block" id="paramContainer">
+            <h3 onclick="toggleBlock('paramBlock')" style="cursor:pointer;">
+                ➕ Thêm tham số
+            </h3>
+
+            <div id="paramBlock">
+                <label>Tên param:</label>
+                <auto-scroll-input type="text" id="paramName" placeholder="Ví dụ: A"></auto-scroll-input>
+                <label>Mô tả:</label>
+                <auto-scroll-input type="text" id="paramDesc" placeholder="Ví dụ: số lượng máy"></auto-scroll-input>
+                <label>Giá trị:</label>
+                <auto-scroll-input type="number" id="paramValue" placeholder="Ví dụ: 10"></auto-scroll-input>
+                <label>Group:</label>
+                <auto-scroll-input type="text" id="paramGroup" placeholder="Ví dụ: Nhân sự"></auto-scroll-input>
+
+                <label>Màu nền:</label>
+                <input type="color" id="paramColor" value="#f0f0f0">
+
+                <label>Format:</label>
+                <select id="paramFormat">
+                    <option value="">(Mặc định)</option>
+                    <option value="currency">Tiền tệ (VND)</option>
+                    <option value="decimal">Số thập phân</option>
+                    <option value="percent">Phần trăm</option>
+                </select>
+
+                <button onclick="addParam()" id="addParamButton">Thêm tham số</button>
+            </div>
+            <div id="params" class="scroll-box"></div>
+
+        </div>
+
+        <div class="divider" id="divider"></div>
+        <!-- Thêm công thức -->
+        <div class="block formula-block" id="formulaContainer">
+            <h3>Thêm công thức</h3>
+            <label>Tên công thức:</label>
+            <auto-scroll-input type="text" id="formulaName" placeholder="Ví dụ: Doanh thu"></auto-scroll-input>
+            <label>Mô tả:</label>
+            <auto-scroll-input type="text" id="formulaDesc"
+                placeholder="Ví dụ: doanh thu hàng tháng"></auto-scroll-input>
+            <label>Công thức:</label>
+            <auto-scroll-input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2"></auto-scroll-input>
+            <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
+            <div id="formulas" class="scroll-box"></div>
+        </div>
+
+
+    </div>
+    <div id="contextMenu" class="context-menu">
+    </div>
+
+    <script>
+
+        const isMobile = /Mobi|Android|iPhone|iPad|iPod|Windows Phone/i.test(navigator.userAgent);
+
+        class AutoScrollInput extends HTMLElement {
+            connectedCallback() {
+                // nếu trong tag chưa có input thì mới tạo
+                if (!this.querySelector("input")) {
+                    const input = document.createElement("input");
+
+                    // copy toàn bộ attribute từ custom tag xuống input
+                    Array.from(this.attributes).forEach(attr => {
+                        input.setAttribute(attr.name, attr.value);
+                    });
+
+                    // auto scroll khi focus
+                    input.addEventListener("focus", () => {
+                        if (isMobile) {
+                            setTimeout(() => {
+                                input.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }, 300);
+                        }
+                    });
+                    this.appendChild(input);
+                }
+            }
+
+            // getter/setter để dùng như <input>
+            get value() {
+                return this.querySelector("input")?.value;
+            }
+            set value(val) {
+                if (this.querySelector("input")) {
+                    this.querySelector("input").value = val;
+                }
+            }
+        }
+
+        class FormattedInput extends AutoScrollInput {
+            connectedCallback() {
+                super.connectedCallback();
+                const input = this.querySelector("input");
+
+                const format = this.getAttribute("format") || "";
+
+                // set giá trị ban đầu (formatted)
+                if (this.hasAttribute("value")) {
+                    input.value = this.formatValue(this.getAttribute("value"), format);
+                }
+
+                // Khi focus → hiện raw value
+                input.addEventListener("focus", () => {
+                    const raw = this.getAttribute("value");
+                    if (raw !== null) input.value = raw;
+                });
+
+                // Khi blur → format lại
+                input.addEventListener("blur", () => {
+                    let val = input.value;
+                    let num = parseFloat(val.replace(/[^\d.-]/g, ""));
+                    if (isNaN(num)) num = 0;
+
+                    this.setAttribute("value", num); // update attribute để đồng bộ
+                    input.value = this.formatValue(num, format);
+
+                    // trigger sự kiện custom để cha biết có update
+                    //this.dispatchEvent(new CustomEvent("valueChanged", { detail: { key: this.id, value: num } }));
+                });
+
+                input.addEventListener("blur", () => {
+                    let val = input.value;
+                    let num = parseFloat(val.replace(/[^\d.-]/g, ""));
+                    if (isNaN(num)) num = 0;
+
+                    this.setAttribute("value", num); // update attribute để đồng bộ
+                    input.value = this.formatValue(num, format);
+
+                    // trigger sự kiện custom để cha biết có update
+                    //this.dispatchEvent(new CustomEvent("valueChanged", { detail: { key: this.id, value: num } }));
+                });
+            }
+
+            formatValue(val, format) {
+                if (val == null || isNaN(val)) return val;
+                switch (format) {
+                    case "currency":
+                        return new Intl.NumberFormat("vi-VN").format(val) + " VND";
+                    case "decimal":
+                        return new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+                    case "percent":
+                        return val + " %";
+                    default:
+                        return val;
+                }
+            }
+
+            get value() { return parseFloat(this.getAttribute("value")); }
+            set value(val) {
+                this.setAttribute("value", val);
+                const format = this.getAttribute("format") || "";
+                this.querySelector("input").value = this.formatValue(val, format);
+            }
+        }
+
+
+        //#region View function
+        function toggleFullscreen() {
+            const btn = document.getElementById("fullscreenBtn");
+
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                // Vào fullscreen
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen();
+                } else if (document.documentElement.webkitRequestFullscreen) {
+                    document.documentElement.webkitRequestFullscreen();
+                }
+                btn.innerText = "❎ Thoát Fullscreen";
+            } else {
+                // Thoát fullscreen
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+                btn.innerText = "🔳 Vào Fullscreen";
+            }
+        }
+
+        function exportData() {
+            // Hỏi tên file
+            let filename = prompt("Nhập tên file để lưu:", "pt-data");
+            if (filename === null) return; // user bấm Cancel
+            filename = filename.trim() || "pt-data"; // nếu bỏ trống thì lấy mặc định
+
+            // Gom dữ liệu
+            const data = {
+                params: params,
+                formulas: formulas
+            };
+            saveToLocal(data)
+            // Tạo file JSON
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename.endsWith(".json") ? filename : filename + ".json";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importData(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    params = data.params || {};
+                    formulas = data.formulas || {};
+                    renderParams();
+                    renderFormulas();
+                    updateFormulaResults();
+                    alert("Import dữ liệu thành công!");
+                } catch (err) {
+                    alert("File không hợp lệ: " + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+        //#region Xử lý layout divider
+        const divider = document.getElementById("divider");
+        const mainContainer = document.getElementById("mainContainer");
+        const paramContainer = document.getElementById("paramContainer");
+
+        let isResizing = false;
+
+        divider.addEventListener("mousedown", startResize);
+        divider.addEventListener("touchstart", startResize, { passive: false });
+
+        function startResize(e) {
+            isResizing = true;
+            document.body.classList.add("mouse-effect-no-select");
+            document.addEventListener("mousemove", resize);
+            document.addEventListener("mouseup", stopResize);
+            document.addEventListener("touchmove", resize, { passive: false });
+            document.addEventListener("touchend", stopResize);
+        }
+
+        function resize(e) {
+            if (!isResizing) return;
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+
+            // Tính tọa độ X tương đối trong container
+            const rect = mainContainer.getBoundingClientRect();
+            const dividerWidth = divider.getBoundingClientRect().width;
+            let x = clientX - rect.left;               // px từ mép trái container
+            let newWidth = ((x - dividerWidth / 2) / rect.width) * 100;     // đổi sang %
+
+            // Giới hạn min–max
+            const MIN_PCT = 30, MAX_PCT = 60;
+            if (newWidth < MIN_PCT) newWidth = MIN_PCT;
+            if (newWidth > MAX_PCT) newWidth = MAX_PCT;
+
+            // Set flex-basis để đổi chiều rộng cột trái
+            paramContainer.style.flexBasis = `${newWidth}%`;
+
+            // Ngăn scroll khi kéo trên mobile
+            if (e.cancelable) e.preventDefault();
+
+            // Debug
+            // console.log("x=", x, "rect.width=", rect.width, "newWidth%=", newWidth);
+        }
+
+        function stopResize() {
+            isResizing = false;
+            document.body.classList.remove("mouse-effect-no-select");
+            document.removeEventListener("mousemove", resize);
+            document.removeEventListener("mouseup", stopResize);
+            document.removeEventListener("touchmove", resize);
+            document.removeEventListener("touchend", stopResize);
+        }
+        //#endregion
+
+        //#endregion
+
+        //#region Utils
+        function formatValue(val, format) {
+            console.log("formatValue");
+
+            if (val == null || isNaN(val)) return val;
+
+            switch (format) {
+                case "currency":
+                    return new Intl.NumberFormat("vi-VN").format(val) + " VND";
+                case "decimal":
+                    return new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
+                case "percent":
+                    return val + " %";
+                default:
+                    return val; // mặc định: hiển thị raw
+            }
+        }
+        //#endregion
+
+        //#region List Context Menu
+        let currentType = null;
+        let currentName = null;
+        const menu = document.getElementById("contextMenu");
+
+        const MENU_ACTIONS = {
+            param: [
+                { icon: "✏️", label: "Edit", action: (name) => editParam(name) },
+                { icon: "❌", label: "Delete", action: (name) => deleteParam(name) }
+            ],
+            formula: [
+                { icon: "✏️", label: "Edit", action: (name) => editFormula(name) },
+                { icon: "❌", label: "Delete", action: (name) => deleteFormula(name) }
+            ]
+        };
+
+        function openContextMenu(e, type, name) {
+            e.preventDefault();
+            currentType = type;
+            currentName = name;
+
+            // Build menu items theo type
+            menu.innerHTML = MENU_ACTIONS[type]
+                .map(item => `
+      <div class="context-menu-item" onclick="handleContext('${item.label}')">
+        ${item.icon} ${item.label}
+      </div>
+    `).join("");
+
+            menu.style.display = "block";
+            menu.style.left = e.pageX + "px";
+            menu.style.top = e.pageY + "px";
+        }
+
+        function handleContext(label) {
+            if (!currentType || !currentName) return;
+            const item = MENU_ACTIONS[currentType].find(x => x.label === label);
+            if (item) item.action(currentName);
+            menu.style.display = "none";
+        }
+
+        // Ẩn menu khi click ra ngoài
+        document.addEventListener("click", () => menu.style.display = "none");
+
+        //#endregion 
+
+        //#region Param
+        let params = {};
+        let editingParamName = null;
+
+        function editParam(name) {
+            const p = params[name];
+            if (!p) return;
+
+            // Fill input
+            document.getElementById("paramName").value = name;
+            document.getElementById("paramValue").value = p.value;
+            document.getElementById("paramGroup").value = p.group;
+            document.getElementById("paramColor").value = p.color;
+            document.getElementById("paramDesc").value = p.desc || "";
+            document.getElementById("paramFormat").value = p.format;
+            document.getElementById("addParamButton").innerHTML = "Cập nhật";
+            editingParamName = name; // đánh dấu đang edit
+        }
+
+        function addParam() {
+            const name = document.getElementById("paramName").value.trim();
+            const value = parseFloat(document.getElementById("paramValue").value);
+            const desc = document.getElementById("paramDesc").value.trim();
+            const group = document.getElementById("paramGroup").value.trim();
+            const color = document.getElementById("paramColor").value;
+            const format = document.getElementById("paramFormat").value;
+
+            if (!name) { alert("Tên param không được rỗng!"); return; }
+            if (isNaN(value)) { alert("Giá trị phải là số!"); return; }
+
+            if (editingParamName) {
+                delete params[editingParamName];
+                editingParamName = null;
+            }
+
+            params[name] = { value, desc, group, color, format };
+
+            renderParams();
+            updateFormulaResults();
+            saveToLocal({
+                params: params,
+                formulas: formulas
+            });
+
+            // reset input
+            document.getElementById("paramName").value = "";
+            document.getElementById("paramValue").value = "";
+            document.getElementById("paramDesc").value = "";
+            document.getElementById("paramGroup").value = "";
+            document.getElementById("paramColor").value = "#f0f0f0";
+        }
+
+
+        function toggleBlock(id) {
+            const el = document.getElementById(id);
+            const title = el.previousElementSibling; // h3
+            if (el.style.display === "none") {
+                el.style.display = "block";
+                title.innerText = title.innerText.replace("➕", "➖");
+            } else {
+                el.style.display = "none";
+                title.innerText = title.innerText.replace("➖", "➕");
+            }
+        }
+
+        function deleteParam(key) {
+            delete params[key];
+            renderParams();
+            updateFormulaResults();
+        }
+
+        // Render danh sách param với input để chỉnh sửa realtime
+        let groupState = {}; // Lưu trạng thái expand/collapse của từng group
+
+        function renderParams() {
+            const paramsContainer = document.getElementById("params");
+            paramsContainer.innerHTML = ""; // clear cũ
+
+            const title = document.createElement("h4");
+            title.innerText = "Danh sách tham số:";
+            paramsContainer.appendChild(title);
+
+            // Gom param theo group
+            let grouped = {};
+            for (let key in params) {
+                let p = params[key];
+                let g = p.group || "Ungrouped";
+                if (!grouped[g]) grouped[g] = [];
+                grouped[g].push({ name: key, ...p });
+            }
+
+            for (let g in grouped) {
+                if (!(g in groupState)) groupState[g] = true; // mặc định expand
+
+                const groupDiv = document.createElement("div");
+                groupDiv.className = "param-group";
+
+                // header
+                const header = document.createElement("div");
+                header.className = "group-header";
+                header.innerHTML = `${groupState[g] ? "▼" : "▶"} <b>${g}</b>`;
+                header.addEventListener("click", () => toggleGroup(g));
+                groupDiv.appendChild(header);
+
+                // container
+                const groupContainer = document.createElement("div");
+                groupContainer.id = `group-${g}`;
+                groupContainer.style.display = groupState[g] ? "block" : "none";
+                groupContainer.style.marginLeft = "15px";
+                groupDiv.appendChild(groupContainer);
+
+                // từng param
+                grouped[g].forEach(p => {
+                    const item = document.createElement("div");
+                    item.className = "param-item list-item";
+                    item.style.setProperty("--list-item-bg", p.color || "#fafafa");
+                    item.addEventListener("contextmenu", e => openContextMenu(e, "param", p.name));
+
+                    const inner = document.createElement("div");
+
+                    // label + input
+                    const label = document.createTextNode(`${p.name} = `);
+                    inner.appendChild(label);
+
+                    const input = document.createElement("input");
+                    input.type = "text";
+                    input.value = formatValue(p.value, p.format);
+
+                    input.addEventListener("focus", () => {
+                        console.log("onFocus");
+                        input.value = p.value; // raw value
+                    });
+                    input.addEventListener("blur", () => {
+                        console.log("onBlur");
+                        updateParamFormatted(p.name, input.value);
+                    });
+                    input.addEventListener("change", () => {
+                        console.log("onChange");
+                        if (params[p.name]) {
+                            params[p.name].value = parseFloat(input.value) || 0;
+                            updateFormulaResults();
+                        }
+                    });
+
+                    inner.appendChild(input);
+
+                    // description
+                    const desc = document.createElement("div");
+                    desc.style.fontSize = "12px";
+                    desc.style.color = "#333";
+                    desc.innerText = p.desc || "";
+                    inner.appendChild(desc);
+
+                    item.appendChild(inner);
+                    groupContainer.appendChild(item);
+                });
+
+                paramsContainer.appendChild(groupDiv);
+            }
+        }
+
+
+        function updateParamFormatted(key, val) {
+            console.log("updateParamFormatted");
+            // loại bỏ ký tự không phải số trước
+            let num = parseFloat(val.replace(/[^\d.-]/g, ""));
+            if (isNaN(num)) num = 0;
+            if (params[key]) {
+                params[key].value = num;
+                renderParams();
+                updateFormulaResults();
+            }
+        }
+
+        function toggleGroup(g) {
+            groupState[g] = !groupState[g];
+            renderParams();
+        }
+
+        //#endregion
+
+        //#region Formula
+        let formulas = {};   // key = tên công thức, value = { raw, display }
+        let editingFormulaName = null;
+
+        // Format công thức: thêm khoảng trắng và đổi * thành ×
+        function formatFormulaDisplay(formula) {
+            return formula
+                .replace(/\*/g, "×")              // đổi dấu nhân
+                .replace(/\//g, "÷")              // có thể đổi dấu chia
+                .replace(/([\+\-\×÷])/g, " $1 ")  // thêm khoảng trắng quanh toán tử
+                .replace(/\s+/g, " ")             // gộp nhiều khoảng trắng thành 1
+                .trim();
+        }
+
+        function deleteFormula(name) {
+            delete formulas[name];
+            renderFormulas();
+            updateFormulaResults();
+        }
+
+        function editFormula(name) {
+            const f = formulas[name];
+            if (!f) return;
+
+            document.getElementById("formulaName").value = name;
+            document.getElementById("formulaInput").value = f.raw;
+            document.getElementById("formulaDesc").value = f.desc || "";
+
+            editingFormulaName = name;
+        }
+
+        function addFormula() {
+            const name = document.getElementById("formulaName").value.trim() || `C${Object.keys(formulas).length + 1}`;
+            const formula = document.getElementById("formulaInput").value.trim();
+            const desc = document.getElementById("formulaDesc").value.trim();
+
+            if (!formula) { alert("Chưa nhập công thức!"); return; }
+
+            // Nếu đang edit → xóa công thức cũ
+            if (editingFormulaName) {
+                document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
+                delete formulas[editingFormulaName];
+                editingFormulaName = null;
+            }
+
+            formulas[name] = {
+                raw: formula,
+                display: formatFormulaDisplay(formula),
+                desc: desc
+            };
+
+            renderFormulas();
+            updateFormulaResults();
+
+            document.getElementById("formulaName").value = "";
+            document.getElementById("formulaInput").value = "";
+            document.getElementById("formulaDesc").value = "";
+        }
+
+        // Render danh sách công thức
+        function renderFormulas() {
+            let html = "<h4>Danh sách công thức:</h4>";
+            for (let [name, f] of Object.entries(formulas)) {
+                html += `
+      <div class="formula-item list-item" 
+            oncontextmenu="openContextMenu(event, 'formula', '${name}')"
+            style="--list-item-bg:${'#dddddd'};">
+        <div>
+          <span><b>${name}</b>: <span id="formulaDisplay_${name}">${f.display}</span></span>
+          <span id="formulaResult_${name}" class="formula-result"></span>
+          <div style="font-size:12px; color:#666;">${f.desc || ""}</div>
+        </div>
+      </div>`;
+            }
+            document.getElementById("formulas").innerHTML = html;
+        }
+
+        // Tính toán lại tất cả công thức
+        function updateFormulaResults() {
+            let scope = {};
+            // 1) Map params -> scope (lấy field value nếu là object)
+            for (let [k, v] of Object.entries(params)) {
+                scope[k] = (v && typeof v === "object" && "value" in v) ? v.value : v;
+            }
+
+            // 2) Tiêm alias các hàm/const toán học phổ biến vào scope
+            const MATH_ALIASES = {
+                ceil: Math.ceil,
+                floor: Math.floor,
+                round: Math.round,
+                min: Math.min,
+                max: Math.max,
+                pow: Math.pow,
+                abs: Math.abs,
+                sqrt: Math.sqrt,
+                log: Math.log,
+                exp: Math.exp,
+                sin: Math.sin,
+                cos: Math.cos,
+                tan: Math.tan,
+                asin: Math.asin,
+                acos: Math.acos,
+                atan: Math.atan,
+                atan2: Math.atan2,
+                trunc: Math.trunc,
+                random: Math.random,
+                PI: Math.PI,
+                E: Math.E
+            };
+            Object.assign(scope, MATH_ALIASES);
+
+            // Tập tên “được phép” để không bị highlight thiếu
+            const ALLOWED_NAMES = new Set([...Object.keys(scope), "Math"]);
+
+            for (let [name, f] of Object.entries(formulas)) {
+                try {
+                    let keys = Object.keys(scope);
+                    let values = Object.values(scope);
+
+                    // Evaluate công thức
+                    let func = new Function(...keys, `return ${f.raw};`);
+                    let result = func(...values);
+
+                    // Lưu kết quả vào scope để các công thức sau có thể dùng tiếp
+                    scope[name] = result;
+
+                    // Render UI
+                    document.getElementById("formulaResult_" + name).innerText = " = " + result;
+                    document.getElementById("formulaDisplay_" + name).innerHTML = f.display;
+
+                } catch (e) {
+                    // Bắt tên biến/hàm trong raw
+                    const tokens = f.raw.match(/[a-zA-Z_]\w*/g) || [];
+                    // Lọc ra những tên chưa có trong scope và không thuộc allowed (Math funcs/const)
+                    const missing = tokens.filter(t => !ALLOWED_NAMES.has(t));
+
+                    if (missing.length > 0) {
+                        // highlight đỏ các biến thiếu trong display
+                        const highlighted = f.display.replace(
+                            new RegExp("\\b(" + missing.join("|") + ")\\b", "g"),
+                            '<span style="color:red;font-weight:bold;">$1</span>'
+                        );
+                        document.getElementById("formulaDisplay_" + name).innerHTML = highlighted;
+                        document.getElementById("formulaResult_" + name).innerText =
+                            " (Thiếu: " + missing.join(", ") + ")";
+                    } else if (/Unexpected/.test(e.message)) {
+                        document.getElementById("formulaResult_" + name).innerText = " (Lỗi cú pháp)";
+                    } else {
+                        document.getElementById("formulaResult_" + name).innerText = " (Lỗi: " + e.message + ")";
+                    }
+                }
+            }
+        }
+
+        //#endregion
+
+        // Lưu local mỗi khi có thay đổi
+        function clearWorkspace() {
+            if (!confirm("Bạn có chắc muốn xoá toàn bộ Param và Formula hiện tại không?")) return;
+
+            params = {};
+            formulas = {};
+            renderParams();
+            renderFormulas();
+            updateFormulaResults();
+            saveToLocal({ params, formulas }); // clear cả localStorage luôn
+        }
+
+        function saveToLocal(data) {
+            localStorage.setItem("pt-latest-data", JSON.stringify(data));
+        }
+
+        // Load khi mở page
+        function loadFromLocal() {
+            const raw = localStorage.getItem("pt-latest-data");
+            if (!raw) return;
+            try {
+                const data = JSON.parse(raw);
+                params = data.params || {};
+                formulas = data.formulas || {};
+                renderParams();
+                renderFormulas();
+                updateFormulaResults();
+            } catch (e) {
+                console.error("Không load được dữ liệu local:", e);
+            }
+        }
+
+        // Gọi khi page khởi động
+        window.addEventListener("DOMContentLoaded", loadFromLocal);
+        // Đăng ký custom tag <auto-scroll-input>
+        customElements.define("auto-scroll-input", AutoScrollInput);
+        customElements.define("formatted-input", FormattedInput);
+
+        // Chèn saveToLocal() vào cuối addParam, addFormula, deleteParam, deleteFormula
+
+    </script>
+</body>
+
+</html>
