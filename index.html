@@ -54,8 +54,26 @@
             border-radius: 4px;
         }
 
+        .group-header::before {
+            content: "▶ ";
+            display: inline-block;
+            width: 1.2em;
+        }
+
+        .group-header[data-expanded="true"]::before {
+            content: "▼ ";
+        }
+
         .group-children {
             margin-left: 20px;
+        }
+
+        .group-block .group-children {
+            display: none;
+        }
+
+        .group-block[data-expanded="true"] .group-children {
+            display: block;
         }
 
         /* #endregion */
@@ -278,7 +296,7 @@
             </div>
             <param-list id="paramsView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('param')"
                 ongrouptoggle="handleGroupToggle">
-                <template>
+                <template data-role="item">
                     <div class="param-item" style="--list-item-bg: {{color}};">
                         <div style="display: block;">
                             <span>{{name}}</span> =
@@ -287,6 +305,15 @@
                         </div>
                     </div>
 
+                </template>
+                <template data-role="group">
+                    <div class="group-block" data-expanded="{{expanded}}">
+                        <div class="group-header" data-expanded="{{expanded}}">
+                            <span class="group-name">{{name}}</span>
+                            <span class="group-meta">(Group)</span>
+                        </div>
+                        <div class="group-children"></div>
+                    </div>
                 </template>
             </param-list>
         </div>
@@ -309,7 +336,7 @@
             <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
             <param-list id="formulasView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('formula')"
                 ongrouptoggle="handleGroupToggle">
-                <template>
+                <template data-role="item">
                     <div class="param-item" style="--list-item-bg: {{color}};">
                         <div style="display: block;">
                             <span>{{name}}</span>:
@@ -317,6 +344,15 @@
                             <formatted-input value="{{result}}" format="{{format}}" readonly></formatted-input>
                             <div style="font-size:12px; color:#666;">{{desc}}</div>
                         </div>
+                    </div>
+                </template>
+                <template data-role="group">
+                    <div class="group-block" data-expanded="{{expanded}}">
+                        <div class="group-header" data-expanded="{{expanded}}">
+                            <span class="group-name">{{name}}</span>
+                            <span class="group-meta">(Group)</span>
+                        </div>
+                        <div class="group-children"></div>
                     </div>
                 </template>
             </param-list>
@@ -751,7 +787,9 @@
 
         class ParamListView extends HTMLElement {
             static TAGS = {
-                item_template: "template",
+                item_template: 'template[data-role="item"]',
+                group_template: 'template[data-role="group"]',
+                fallback_template: 'template',
                 param_list: "param-list"
             };
             static CLASSES = {
@@ -786,6 +824,37 @@
                 return this.rootView._itemElems
             }
 
+            _getTemplateElement(selector, fallbackSelector) {
+                const root = this.rootView ?? this;
+                if (!root._templateCache) {
+                    root._templateCache = new Map();
+                }
+
+                if (!root._templateCache.has(selector)) {
+                    let template = root.querySelector(selector);
+                    if (!template && fallbackSelector) {
+                        template = root.querySelector(fallbackSelector);
+                    }
+                    root._templateCache.set(selector, template || null);
+                }
+
+                return root._templateCache.get(selector);
+            }
+
+            _populateChildTemplates(listEl) {
+                const T = ParamListView.TAGS;
+                const itemTemplate = this._getTemplateElement(T.item_template, T.fallback_template);
+                const groupTemplate = this._getTemplateElement(T.group_template);
+
+                listEl.innerHTML = "";
+                if (itemTemplate) {
+                    listEl.appendChild(itemTemplate.cloneNode(true));
+                }
+                if (groupTemplate) {
+                    listEl.appendChild(groupTemplate.cloneNode(true));
+                }
+            }
+
             renderAll() {
                 const C = ParamListView.CLASSES;
                 const T = ParamListView.TAGS;
@@ -793,10 +862,11 @@
                 this.querySelectorAll(`.${C.item}, .${C.groupBlock}`).forEach(el => el.remove());
                 if (this === this.rootView) {
                     this._itemElems.clear();
+                    this._templateCache = null;
                 }
 
                 if (!this._data) return;
-                const template = this.querySelector(T.item_template);
+                const template = this._getTemplateElement(T.item_template, T.fallback_template);
                 if (!template) return;
 
                 this._data.items.forEach(p => {
@@ -920,43 +990,83 @@
                 const T = ParamListView.TAGS;
                 // --- group ---
                 if (itemData.children) {
-                    const groupBlock = document.createElement("div");
-                    groupBlock.className = C.groupBlock;
+                    const groupTemplate = this._getTemplateElement(T.group_template);
+                    let groupBlock;
+                    let header;
+                    let childrenContainer;
+                    const usesTemplate = Boolean(groupTemplate);
 
-                    const header = document.createElement("div");
-                    header.className = C.groupHeader;
-                    header.textContent =
-                        (itemData.expanded ? "▼ " : "▶ ") + itemData.name + " (Group)";
-                    groupBlock.appendChild(header);
+                    if (usesTemplate) {
+                        const fragment = groupTemplate.content.cloneNode(true);
+                        this._bindFragmentToItem(fragment, itemData);
+                        const container = document.createElement("div");
+                        container.appendChild(fragment);
+                        groupBlock = container.firstElementChild;
+                        header = groupBlock.querySelector(`.${C.groupHeader}`) || groupBlock;
+                        childrenContainer = groupBlock.querySelector(`.${C.groupChildren}`);
+                    } else {
+                        groupBlock = document.createElement("div");
+                        groupBlock.className = C.groupBlock;
+                        groupBlock.setAttribute("data-expanded", String(Boolean(itemData.expanded)));
 
-                    const childrenContainer = document.createElement("div");
-                    childrenContainer.className = C.groupChildren;
-                    childrenContainer.style.display = itemData.expanded ? "block" : "none";
+                        header = document.createElement("div");
+                        header.className = C.groupHeader;
+                        header.setAttribute("data-expanded", String(Boolean(itemData.expanded)));
+                        header.textContent = `${itemData.name} (Group)`;
+                        groupBlock.appendChild(header);
+
+                        childrenContainer = document.createElement("div");
+                        childrenContainer.className = C.groupChildren;
+                        groupBlock.appendChild(childrenContainer);
+                    }
+
+                    if (!childrenContainer) {
+                        childrenContainer = document.createElement("div");
+                        childrenContainer.className = C.groupChildren;
+                        groupBlock.appendChild(childrenContainer);
+                    }
 
                     const childList = document.createElement(T.param_list);
-                    childList.innerHTML = this.querySelector(T.item_template).outerHTML;
+                    this._populateChildTemplates(childList);
                     childList.rootView = this.rootView ?? this;
                     childList.data = itemData.children;
                     childrenContainer.appendChild(childList);
-                    groupBlock.appendChild(childrenContainer);
 
-                    // toggle expand/collapse
                     header.addEventListener("click", () => {
                         itemData.expanded = !itemData.expanded;
-                        childrenContainer.style.display = itemData.expanded ? "block" : "none";
-                        header.textContent =
-                            (itemData.expanded ? "▼ " : "▶ ") + itemData.name + " (Group)";
+                        if (!usesTemplate) {
+                            const expanded = Boolean(itemData.expanded);
+                            groupBlock.setAttribute("data-expanded", String(expanded));
+                            header.setAttribute("data-expanded", String(expanded));
+                        }
                         this._emitEvent("grouptoggle", { group: itemData, expanded: itemData.expanded });
                     });
 
-                    // drag/drop
+                    if (!usesTemplate && typeof itemData.registerListener === "function") {
+                        itemData.registerListener(({ field }) => {
+                            if (field === "name") {
+                                header.textContent = `${itemData.name} (Group)`;
+                            }
+                            if (field === "expanded") {
+                                const expanded = Boolean(itemData.expanded);
+                                groupBlock.setAttribute("data-expanded", String(expanded));
+                                header.setAttribute("data-expanded", String(expanded));
+                            }
+                        });
+                    }
+
                     this._attachDragDrop(header, itemData);
                     this._attachItemEvents(header, itemData);
                     return groupBlock;
                 }
 
                 // --- item thường ---
-                const template = this.querySelector(T.item_template);
+                const template = this._getTemplateElement(T.item_template, T.fallback_template);
+                if (!template) {
+                    const fallbackElem = document.createElement("div");
+                    fallbackElem.classList.add(C.item);
+                    return fallbackElem;
+                }
                 const fragment = template.content.cloneNode(true);
 
                 this._bindFragmentToItem(fragment, itemData);
@@ -1675,47 +1785,70 @@
         //#endregion
 
         //#region List Context Menu
-        let currentType = null;
-        let currentName = null;
+        let contextMenuType = null;
+        let contextMenuTarget = null;
         const menu = document.getElementById("contextMenu");
 
         const MENU_ACTIONS = {
             param: [
-                { icon: "✏️", label: "Edit", action: (name) => editParam(name) },
-                { icon: "❌", label: "Delete", action: (name) => deleteParam(name) }
+                { icon: "✏️", label: "Edit", action: (item) => editParam(item) },
+                { icon: "❌", label: "Delete", action: (item) => deleteParam(item) }
             ],
             formula: [
-                { icon: "✏️", label: "Edit", action: (name) => editFormula(name) },
-                { icon: "❌", label: "Delete", action: (name) => deleteFormula(name) }
+                { icon: "✏️", label: "Edit", action: (item) => editFormula(item) },
+                { icon: "❌", label: "Delete", action: (item) => deleteFormula(item) }
             ]
         };
         function handleContextMenu(e) {
             const { item, x, y, extraParam } = e.detail;
-            console.log("🟠 Context menu:", item.name, x, y);
-            const type = extraParam[0]
-            const itemName = item.name
+            console.log("🟠 Context menu:", item?.name, x, y);
+            const type = Array.isArray(extraParam) ? extraParam[0] : null;
+            if (!type || !MENU_ACTIONS[type]) {
+                return;
+            }
+            const actions = MENU_ACTIONS[type] || [];
+
+            contextMenuTarget = item;
+            contextMenuType = type;
+
             // Build menu items theo type
-            menu.innerHTML = MENU_ACTIONS[type]
-                .map(item => `
-      <div class="context-menu-item" onclick="handleContext('${item.label}', '${type}', '${itemName}')">
-        ${item.icon} ${item.label}
+            menu.innerHTML = actions
+                .map((action, index) => `
+      <div class="context-menu-item" data-action-index="${index}">
+        ${action.icon} ${action.label}
       </div>
     `).join("");
+
+            menu.querySelectorAll('.context-menu-item').forEach(elem => {
+                elem.addEventListener('click', () => {
+                    const idx = Number(elem.dataset.actionIndex);
+                    handleContext(idx);
+                }, { once: true });
+            });
 
             menu.style.display = "block";
             menu.style.left = x + "px";
             menu.style.top = y + "px";
         }
 
-        function handleContext(label, type, itemName) {
-            if (!type || !itemName) return;
-            const item = MENU_ACTIONS[type].find(x => x.label === label);
-            if (item) item.action(itemName);
+        function handleContext(actionIndex) {
+            if (contextMenuType == null || contextMenuTarget == null) return;
+            const actions = MENU_ACTIONS[contextMenuType] || [];
+            const action = actions[actionIndex];
+            if (action && typeof action.action === "function") {
+                action.action(contextMenuTarget);
+            }
             menu.style.display = "none";
+            contextMenuTarget = null;
+            contextMenuType = null;
         }
 
         // Ẩn menu khi click ra ngoài
-        document.addEventListener("click", () => menu.style.display = "none");
+        document.addEventListener("click", () => {
+            menu.style.display = "none";
+            contextMenuTarget = null;
+            contextMenuType = null;
+        });
 
         //#endregion 
 
@@ -1728,21 +1861,63 @@
 
         let editingParamKey = null;
 
-        function editParam(key) {
-            p = paramIndexer.get(key);
-            if (!p) return;
+        function editParam(target) {
+            const item = typeof target === "string" ? paramIndexer.get(target) : target;
+            if (!item) return;
+
+            if (item && item.children instanceof ObservableList) {
+                editParamGroup(item);
+                return;
+            }
+
+            const key = item.name;
 
             // Fill input
             document.getElementById("paramName").value = key;
-            document.getElementById("paramValue").value = p.value;
-            if (p.groupName) {
-                document.getElementById("paramGroup").value = p.groupName;
-            }
-            document.getElementById("paramColor").value = p.color || "#f0f0f0";
-            document.getElementById("paramDesc").value = p.desc || "";
-            document.getElementById("paramFormat").value = p.format;
+            document.getElementById("paramValue").value = item.value ?? "";
+            document.getElementById("paramGroup").value = item.groupName || "";
+            document.getElementById("paramColor").value = item.color || "#f0f0f0";
+            document.getElementById("paramDesc").value = item.desc || "";
+            document.getElementById("paramFormat").value = item.format || "";
             document.getElementById("addParamButton").innerHTML = "Cập nhật";
             editingParamKey = key; // đánh dấu đang edit
+        }
+
+        function editParamGroup(groupItem) {
+            const currentName = groupItem.name || "";
+            const newNameRaw = prompt("Nhập tên nhóm:", currentName);
+            if (newNameRaw == null) {
+                return;
+            }
+
+            const newName = newNameRaw.trim();
+            if (!newName) {
+                alert("Tên nhóm không được rỗng!");
+                return;
+            }
+
+            if (newName === currentName) {
+                return;
+            }
+
+            const existing = paramIndexer.get(newName);
+            if (existing && existing !== groupItem) {
+                alert(`Tên ${newName} đã được sử dụng!`);
+                return;
+            }
+
+            const oldName = currentName;
+            groupItem.name = newName;
+
+            if (groupItem.children instanceof ObservableList) {
+                groupItem.children.items.forEach(child => {
+                    if (child.groupName === oldName) {
+                        child.groupName = newName;
+                    }
+                });
+            }
+
+            persistWorkspace();
         }
 
         function addParam() {
@@ -1800,8 +1975,8 @@
             persistWorkspace();
         }
 
-        function deleteParam(key) {
-            param = paramIndexer.get(key);
+        function deleteParam(target) {
+            const param = typeof target === "string" ? paramIndexer.get(target) : target;
             if (param) {
                 param.parent.remove(param);
             }
@@ -1829,8 +2004,8 @@
                 .trim();
         }
 
-        function deleteFormula(key) {
-            formula = formulaIndexer.get(key);
+        function deleteFormula(target) {
+            const formula = typeof target === "string" ? formulaIndexer.get(target) : target;
             if (formula) {
                 formula.parent.remove(formula);
             }
@@ -1838,18 +2013,17 @@
             persistWorkspace();
         }
 
-        function editFormula(key) {
-            p = formulaIndexer.get(key);
-            if (!p) return;
+        function editFormula(target) {
+            const item = typeof target === "string" ? formulaIndexer.get(target) : target;
+            if (!item) return;
+            const key = item.name;
 
             // Fill input
             document.getElementById("formulaName").value = key;
-            document.getElementById("formulaDesc").value = p.desc;
-            if (p.groupName) {
-                document.getElementById("formulaGroup").value = p.groupName;
-            }
-            document.getElementById("formulaInput").value = p.raw;
-            document.getElementById("formulaFormat").value = p.format || "";
+            document.getElementById("formulaDesc").value = item.desc || "";
+            document.getElementById("formulaGroup").value = item.groupName || "";
+            document.getElementById("formulaInput").value = item.raw ?? "";
+            document.getElementById("formulaFormat").value = item.format || "";
             document.getElementById("addFormulaButton").innerHTML = "Cập nhật";
             editingFormulaKey = key; // đánh dấu đang edit
         }
