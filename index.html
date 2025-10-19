@@ -1056,7 +1056,7 @@
 
                 // 2️⃣ Attributes
                 fragment.querySelectorAll("*").forEach(el => {
-                    for (let attr of el.attributes) {
+                    for (let attr of [...el.attributes]) {
                         const m = attr.value.match(/{{\s*([\w]+)\s*}}/);
                         if (m) {
                             const key = m[1];
@@ -1075,6 +1075,8 @@
 
                                 // lưu lại binding (để update khi model đổi)
                                 bindings.push({ key, node: el, type: "attr", attrName: attr.name });
+                            } else {
+                                el.removeAttribute(attr.name);
                             }
                         }
                     }
