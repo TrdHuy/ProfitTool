@@ -272,12 +272,7 @@
                 <input type="color" id="paramColor" value="#f0f0f0">
 
                 <label>Format:</label>
-                <select id="paramFormat">
-                    <option value="">(Mặc định)</option>
-                    <option value="currency">Tiền tệ (VND)</option>
-                    <option value="decimal">Số thập phân</option>
-                    <option value="percent">Phần trăm</option>
-                </select>
+                <select id="paramFormat"></select>
 
                 <button onclick="addParam()" id="addParamButton">Thêm tham số</button>
             </div>
@@ -287,7 +282,7 @@
                     <div class="param-item">
                         <div style="display: block;">
                             <span>{{name}}</span> =
-                            <formatted-input value="{{value}}"></formatted-input>
+                            <formatted-input value="{{value}}" format="{{format}}"></formatted-input>
                             <div style="font-size:12px; color:#666;">{{desc}}</div>
                         </div>
                     </div>
@@ -1273,23 +1268,56 @@
 
             // ===== Formatters =====
             static FORMATTERS = {
-                number: (v) => {
-                    const n = parseFloat(v); return isNaN(n) ? '' : n.toLocaleString('vi-VN');
+                number: {
+                    label: "Số nguyên",
+                    fn: (v) => {
+                        const n = parseFloat(v); return isNaN(n) ? '' : n.toLocaleString('vi-VN');
+                    }
                 },
-                currency: (v) => { // VND mặc định
-                    const n = parseFloat(v); return isNaN(n) ? '' : new Intl.NumberFormat('vi-VN').format(n) + ' ₫';
+                currency: {
+                    label: "Tiền tệ (VND)",
+                    fn: (v) => {
+                        const n = parseFloat(v); return isNaN(n) ? '' : new Intl.NumberFormat('vi-VN').format(n) + ' ₫';
+                    }
                 },
-                vnd: (v) => FormattedInput.FORMATTERS.currency(v),
-                usd: (v) => {
-                    const n = parseFloat(v); return isNaN(n) ? '' : '$' + n.toLocaleString('en-US');
+                vnd: {
+                    label: "Tiền tệ (VND)",
+                    hidden: true,
+                    fn: (v) => {
+                        const n = parseFloat(v); return isNaN(n) ? '' : new Intl.NumberFormat('vi-VN').format(n) + ' ₫';
+                    }
                 },
-                percent: (v) => {
-                    const n = parseFloat(v); return isNaN(n) ? '' : n.toFixed(2) + '%';
+                usd: {
+                    label: "Tiền tệ (USD)",
+                    fn: (v) => {
+                        const n = parseFloat(v); return isNaN(n) ? '' : '$' + n.toLocaleString('en-US');
+                    }
                 },
-                decimal: (v) => {
-                    const n = parseFloat(v); return isNaN(n) ? '' : n.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                percent: {
+                    label: "Phần trăm (%)",
+                    fn: (v) => {
+                        const n = parseFloat(v); return isNaN(n) ? '' : n.toFixed(2) + '%';
+                    }
+                },
+                decimal: {
+                    label: "Số thập phân (2 chữ số)",
+                    fn: (v) => {
+                        const n = parseFloat(v); return isNaN(n) ? '' : n.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    }
                 },
             };
+
+            static getFormatOptionsHTML(includeEmpty = true) {
+                const opts = [];
+                if (includeEmpty) {
+                    opts.push(`<option value="">(Mặc định)</option>`);
+                }
+                for (const [key, def] of Object.entries(FormattedInput.FORMATTERS)) {
+                    if (!def || typeof def !== 'object' || def.hidden) continue;
+                    opts.push(`<option value="${key}">${def.label}</option>`);
+                }
+                return opts.join("\n");
+            }
 
             // ===== Public API (properties) =====
             get value() { return this._rawValue; }
@@ -1324,7 +1352,8 @@
 
             // ===== Helpers =====
             _render(initial = false) {
-                const fmt = FormattedInput.FORMATTERS[this.format];
+                const fmtDef = FormattedInput.FORMATTERS[this.format];
+                const fmt = fmtDef?.fn;
                 if (fmt) this._input.value = fmt(this._rawValue);
                 else this._input.value = this._rawValue;
                 if (!initial) this._updateReadonly();
@@ -1338,7 +1367,7 @@
                 if (this._isReadonly()) this._input.setAttribute('readonly', 'true');
                 else this._input.removeAttribute('readonly');
             }
-            _isNumericFormat() { return ['number', 'currency', 'vnd', 'usd', 'percent', 'decimal'].includes(this.format); }
+            _isNumericFormat() { return Boolean(FormattedInput.FORMATTERS[this.format]); }
             _shouldShowSpinner() { const a = (this.getAttribute('spinner') || 'on').toLowerCase(); return this._isNumericFormat() && a !== 'off'; }
             _applyNumericAttrs() {
                 if (this._input.type !== 'number') return;
@@ -1596,16 +1625,8 @@
 
             if (val == null || isNaN(val)) return val;
 
-            switch (format) {
-                case "currency":
-                    return new Intl.NumberFormat("vi-VN").format(val) + " VND";
-                case "decimal":
-                    return new Intl.NumberFormat("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
-                case "percent":
-                    return val + " %";
-                default:
-                    return val; // mặc định: hiển thị raw
-            }
+            const fmt = FormattedInput.FORMATTERS[format]?.fn;
+            return typeof fmt === "function" ? fmt(val) : val;
         }
         //#endregion
 
@@ -1955,7 +1976,20 @@
         }
 
         // Gọi khi page khởi động
-        window.addEventListener("DOMContentLoaded", loadFromLocal);
+        window.addEventListener("DOMContentLoaded", () => {
+            const formatOptionsHTML = FormattedInput.getFormatOptionsHTML();
+
+            const paramFormatSelect = document.getElementById("paramFormat");
+            if (paramFormatSelect) {
+                paramFormatSelect.innerHTML = formatOptionsHTML;
+            }
+
+            const formulaFormatSelect = document.getElementById("formulaFormat");
+            if (formulaFormatSelect) {
+                formulaFormatSelect.innerHTML = formatOptionsHTML;
+            }
+            loadFromLocal();
+        });
 
 
         // Lưu trạng thái workspace đã được xử lý trong persistWorkspace()
