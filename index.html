@@ -8,7 +8,12 @@
     <meta charset="UTF-8">
     <title>Param Editor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0A7B34">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAABS3GwHAAABiUlEQVR42u3TMQ0AAAjAMG704A7xYIKPHjWwZJFdA1+FCBgADAAGAAOAAcAAYAAwABgADAAGAAOAAcAAYAAwABgADAAGAAOAAcAAYAAwABgADAAGAAOAAcAAYAAwABgADAAGAAOAAcAAYAAwABgADAAGAAOAAcAAYAAwABgADAAGAAOAAcAAYAAwABgADAAGAAOAAcAAYAAwABgAA4ABwABgADAAGAAMAAYAA4ABwABgADAAGAAMAAYAA4ABwABgADAAGAAMAAYAA4ABwABgADAAGAAMAAYAA4ABwABgADAAGAAMAAYAA4ABwAAYQAQMAAYAA4ABwABgADAAGAAMAAYAA4ABwABgADAAGAAMAAYAA4ABwABgADAAGAAMAAYAA4ABwABgADAAGAAMAAYAA8ClBWsyjnrIzCLtAAAAAElFTkSuQmCC" type="image/png" sizes="192x192">
+    <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAAAD0eNT6AAAG4klEQVR42u3WIQEAAAjAMDR5aEd4KIFjYgWuHtk1AMAvIQIAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAgAEQAgAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAADIAIAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAgAEQAgAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAADIAIAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAgAEQAgAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAADIAIAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAgAEQAgAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAADIAIAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAgAEAAAwAAGAAAAADAAAYAADAAAAABgAAMAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAAAMAABgAAMAAAAAGAAAwAACAAQAADAAAYAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAAGAAAwAAAAAYAADAAAIABAAAMAABgAAAAAwAA3Fk0+WchspDPkQAAAABJRU5ErkJggg==" type="image/png" sizes="512x512">
+    <link rel="manifest" href="manifest.json">
     <style>
         body {
             font-family: 'Inter', 'Roboto', sans-serif;
@@ -267,6 +272,7 @@
         <input type="file" id="importFile" accept=".json" onchange="importData(this)">
         <button onclick="clearWorkspace()">🧹 Clear</button>
         <button onclick="toggleFullscreen()">🔳 Toggle Fullscreen</button>
+        <button id="installAppButton" hidden>📲 Install App</button>
 
     </div>
     <div class="container" id="mainContainer">
@@ -2230,6 +2236,71 @@
             const { group, expanded } = e.detail;
             // console.log(`📂 Group ${group.name} is now ${expanded ? "expanded" : "collapsed"}`);
         }
+
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js').catch((error) => {
+                    console.error('Service worker registration failed:', error);
+                });
+            });
+        }
+
+        const installButton = document.getElementById('installAppButton');
+        let deferredInstallPrompt = null;
+
+        const displayModeMedia = window.matchMedia ? window.matchMedia('(display-mode: standalone)') : null;
+
+        const hideInstallButtonForStandalone = () => {
+            const isStandalone = (displayModeMedia && displayModeMedia.matches) || window.navigator.standalone;
+            if (isStandalone && installButton) {
+                installButton.hidden = true;
+            }
+        };
+
+        hideInstallButtonForStandalone();
+        if (displayModeMedia?.addEventListener) {
+            displayModeMedia.addEventListener('change', hideInstallButtonForStandalone);
+        } else if (displayModeMedia?.addListener) {
+            displayModeMedia.addListener(hideInstallButtonForStandalone);
+        }
+
+        window.addEventListener('beforeinstallprompt', (event) => {
+            event.preventDefault();
+            deferredInstallPrompt = event;
+            if (installButton) {
+                installButton.hidden = false;
+                installButton.disabled = false;
+                installButton.textContent = '📲 Install App';
+            }
+        });
+
+        installButton?.addEventListener('click', async () => {
+            if (!deferredInstallPrompt) {
+                return;
+            }
+
+            installButton.disabled = true;
+            deferredInstallPrompt.prompt();
+            const { outcome } = await deferredInstallPrompt.userChoice;
+            deferredInstallPrompt = null;
+
+            if (outcome === 'accepted') {
+                installButton.textContent = '✅ Đã cài đặt';
+                installButton.hidden = true;
+            } else {
+                installButton.disabled = false;
+                installButton.hidden = false;
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredInstallPrompt = null;
+            if (installButton) {
+                installButton.textContent = '✅ Đã cài đặt';
+                installButton.hidden = true;
+                installButton.disabled = false;
+            }
+        });
     </script>
 </body>
 
