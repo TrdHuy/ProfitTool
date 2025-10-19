@@ -925,8 +925,11 @@
 
                     const header = document.createElement("div");
                     header.className = C.groupHeader;
-                    header.textContent =
-                        (itemData.expanded ? "▼ " : "▶ ") + itemData.name + " (Group)";
+                    const updateHeader = () => {
+                        header.textContent =
+                            (itemData.expanded ? "▼ " : "▶ ") + itemData.name + " (Group)";
+                    };
+                    updateHeader();
                     groupBlock.appendChild(header);
 
                     const childrenContainer = document.createElement("div");
@@ -944,10 +947,18 @@
                     header.addEventListener("click", () => {
                         itemData.expanded = !itemData.expanded;
                         childrenContainer.style.display = itemData.expanded ? "block" : "none";
-                        header.textContent =
-                            (itemData.expanded ? "▼ " : "▶ ") + itemData.name + " (Group)";
+                        updateHeader();
                         this._emitEvent("grouptoggle", { group: itemData, expanded: itemData.expanded });
                     });
+
+                    if (typeof itemData.registerListener === "function") {
+                        itemData.registerListener(({ field }) => {
+                            if (field === "name" || field === "expanded") {
+                                updateHeader();
+                                childrenContainer.style.display = itemData.expanded ? "block" : "none";
+                            }
+                        });
+                    }
 
                     // drag/drop
                     this._attachDragDrop(header, itemData);
@@ -1675,47 +1686,70 @@
         //#endregion
 
         //#region List Context Menu
-        let currentType = null;
-        let currentName = null;
+        let contextMenuType = null;
+        let contextMenuTarget = null;
         const menu = document.getElementById("contextMenu");
 
         const MENU_ACTIONS = {
             param: [
-                { icon: "✏️", label: "Edit", action: (name) => editParam(name) },
-                { icon: "❌", label: "Delete", action: (name) => deleteParam(name) }
+                { icon: "✏️", label: "Edit", action: (item) => editParam(item) },
+                { icon: "❌", label: "Delete", action: (item) => deleteParam(item) }
             ],
             formula: [
-                { icon: "✏️", label: "Edit", action: (name) => editFormula(name) },
-                { icon: "❌", label: "Delete", action: (name) => deleteFormula(name) }
+                { icon: "✏️", label: "Edit", action: (item) => editFormula(item) },
+                { icon: "❌", label: "Delete", action: (item) => deleteFormula(item) }
             ]
         };
         function handleContextMenu(e) {
             const { item, x, y, extraParam } = e.detail;
-            console.log("🟠 Context menu:", item.name, x, y);
-            const type = extraParam[0]
-            const itemName = item.name
+            console.log("🟠 Context menu:", item?.name, x, y);
+            const type = Array.isArray(extraParam) ? extraParam[0] : null;
+            if (!type || !MENU_ACTIONS[type]) {
+                return;
+            }
+            const actions = MENU_ACTIONS[type] || [];
+
+            contextMenuTarget = item;
+            contextMenuType = type;
+
             // Build menu items theo type
-            menu.innerHTML = MENU_ACTIONS[type]
-                .map(item => `
-      <div class="context-menu-item" onclick="handleContext('${item.label}', '${type}', '${itemName}')">
-        ${item.icon} ${item.label}
+            menu.innerHTML = actions
+                .map((action, index) => `
+      <div class="context-menu-item" data-action-index="${index}">
+        ${action.icon} ${action.label}
       </div>
     `).join("");
+
+            menu.querySelectorAll('.context-menu-item').forEach(elem => {
+                elem.addEventListener('click', () => {
+                    const idx = Number(elem.dataset.actionIndex);
+                    handleContext(idx);
+                }, { once: true });
+            });
 
             menu.style.display = "block";
             menu.style.left = x + "px";
             menu.style.top = y + "px";
         }
 
-        function handleContext(label, type, itemName) {
-            if (!type || !itemName) return;
-            const item = MENU_ACTIONS[type].find(x => x.label === label);
-            if (item) item.action(itemName);
+        function handleContext(actionIndex) {
+            if (contextMenuType == null || contextMenuTarget == null) return;
+            const actions = MENU_ACTIONS[contextMenuType] || [];
+            const action = actions[actionIndex];
+            if (action && typeof action.action === "function") {
+                action.action(contextMenuTarget);
+            }
             menu.style.display = "none";
+            contextMenuTarget = null;
+            contextMenuType = null;
         }
 
         // Ẩn menu khi click ra ngoài
-        document.addEventListener("click", () => menu.style.display = "none");
+        document.addEventListener("click", () => {
+            menu.style.display = "none";
+            contextMenuTarget = null;
+            contextMenuType = null;
+        });
 
         //#endregion 
 
@@ -1728,21 +1762,63 @@
 
         let editingParamKey = null;
 
-        function editParam(key) {
-            p = paramIndexer.get(key);
-            if (!p) return;
+        function editParam(target) {
+            const item = typeof target === "string" ? paramIndexer.get(target) : target;
+            if (!item) return;
+
+            if (item && item.children instanceof ObservableList) {
+                editParamGroup(item);
+                return;
+            }
+
+            const key = item.name;
 
             // Fill input
             document.getElementById("paramName").value = key;
-            document.getElementById("paramValue").value = p.value;
-            if (p.groupName) {
-                document.getElementById("paramGroup").value = p.groupName;
-            }
-            document.getElementById("paramColor").value = p.color || "#f0f0f0";
-            document.getElementById("paramDesc").value = p.desc || "";
-            document.getElementById("paramFormat").value = p.format;
+            document.getElementById("paramValue").value = item.value ?? "";
+            document.getElementById("paramGroup").value = item.groupName || "";
+            document.getElementById("paramColor").value = item.color || "#f0f0f0";
+            document.getElementById("paramDesc").value = item.desc || "";
+            document.getElementById("paramFormat").value = item.format || "";
             document.getElementById("addParamButton").innerHTML = "Cập nhật";
             editingParamKey = key; // đánh dấu đang edit
+        }
+
+        function editParamGroup(groupItem) {
+            const currentName = groupItem.name || "";
+            const newNameRaw = prompt("Nhập tên nhóm:", currentName);
+            if (newNameRaw == null) {
+                return;
+            }
+
+            const newName = newNameRaw.trim();
+            if (!newName) {
+                alert("Tên nhóm không được rỗng!");
+                return;
+            }
+
+            if (newName === currentName) {
+                return;
+            }
+
+            const existing = paramIndexer.get(newName);
+            if (existing && existing !== groupItem) {
+                alert(`Tên ${newName} đã được sử dụng!`);
+                return;
+            }
+
+            const oldName = currentName;
+            groupItem.name = newName;
+
+            if (groupItem.children instanceof ObservableList) {
+                groupItem.children.items.forEach(child => {
+                    if (child.groupName === oldName) {
+                        child.groupName = newName;
+                    }
+                });
+            }
+
+            persistWorkspace();
         }
 
         function addParam() {
@@ -1800,8 +1876,8 @@
             persistWorkspace();
         }
 
-        function deleteParam(key) {
-            param = paramIndexer.get(key);
+        function deleteParam(target) {
+            const param = typeof target === "string" ? paramIndexer.get(target) : target;
             if (param) {
                 param.parent.remove(param);
             }
@@ -1829,8 +1905,8 @@
                 .trim();
         }
 
-        function deleteFormula(key) {
-            formula = formulaIndexer.get(key);
+        function deleteFormula(target) {
+            const formula = typeof target === "string" ? formulaIndexer.get(target) : target;
             if (formula) {
                 formula.parent.remove(formula);
             }
@@ -1838,18 +1914,17 @@
             persistWorkspace();
         }
 
-        function editFormula(key) {
-            p = formulaIndexer.get(key);
-            if (!p) return;
+        function editFormula(target) {
+            const item = typeof target === "string" ? formulaIndexer.get(target) : target;
+            if (!item) return;
+            const key = item.name;
 
             // Fill input
             document.getElementById("formulaName").value = key;
-            document.getElementById("formulaDesc").value = p.desc;
-            if (p.groupName) {
-                document.getElementById("formulaGroup").value = p.groupName;
-            }
-            document.getElementById("formulaInput").value = p.raw;
-            document.getElementById("formulaFormat").value = p.format || "";
+            document.getElementById("formulaDesc").value = item.desc || "";
+            document.getElementById("formulaGroup").value = item.groupName || "";
+            document.getElementById("formulaInput").value = item.raw ?? "";
+            document.getElementById("formulaFormat").value = item.format || "";
             document.getElementById("addFormulaButton").innerHTML = "Cập nhật";
             editingFormulaKey = key; // đánh dấu đang edit
         }
