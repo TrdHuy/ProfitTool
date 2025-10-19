@@ -279,7 +279,7 @@
             <param-list id="paramsView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('param')"
                 ongrouptoggle="handleGroupToggle">
                 <template>
-                    <div class="param-item">
+                    <div class="param-item" style="--list-item-bg: {{color}};">
                         <div style="display: block;">
                             <span>{{name}}</span> =
                             <formatted-input value="{{value}}" format="{{format}}"></formatted-input>
@@ -310,7 +310,7 @@
             <param-list id="formulasView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('formula')"
                 ongrouptoggle="handleGroupToggle">
                 <template>
-                    <div class="param-item">
+                    <div class="param-item" style="--list-item-bg: {{color}};">
                         <div style="display: block;">
                             <span>{{name}}</span>:
                             <span>{{display}}</span> =
@@ -966,23 +966,6 @@
                 const elem = container.firstElementChild;
                 elem.classList.add(C.item);
 
-                const applyBackground = (color) => {
-                    const resolved = color && typeof color === "string" && color.trim() !== ""
-                        ? color
-                        : "#fafafa";
-                    elem.style.setProperty("--list-item-bg", resolved);
-                };
-                applyBackground(itemData.color);
-
-                if (typeof itemData.registerListener === "function") {
-                    const onColorChanged = ({ field, newValue }) => {
-                        if (field === "color") {
-                            applyBackground(newValue);
-                        }
-                    };
-                    itemData.registerListener(onColorChanged);
-                }
-
                 this._attachDragDrop(elem, itemData);
                 this._attachItemEvents(elem, itemData);
                 return elem;
@@ -1075,30 +1058,61 @@
 
                 // 2️⃣ Attributes
                 fragment.querySelectorAll("*").forEach(el => {
-                    for (let attr of [...el.attributes]) {
-                        const m = attr.value.match(/{{\s*([\w]+)\s*}}/);
-                        if (m) {
-                            const key = m[1];
-                            if (itemData[key] !== undefined) {
-                                // render ban đầu
-                                el.setAttribute(attr.name, itemData[key]);
+                    [...el.attributes].forEach(attr => {
+                        const matches = [...attr.value.matchAll(/{{\s*([\w]+)\s*}}/g)];
+                        if (!matches.length) return;
 
-                                // nếu là input.value → tạo 2 chiều
-                                if (attr.name === "value" && el.tagName === "INPUT") {
-                                    el.value = itemData[key];
-                                    el.addEventListener("input", () => {
-                                        console.log("el input changed");
-                                        itemData[key] = el.value; // view → model
-                                    });
+                        const placeholders = matches.map(match => ({ token: match[0], key: match[1] }));
+                        const uniqueKeys = [...new Set(placeholders.map(p => p.key))];
+
+                        const binding = {
+                            type: "attr",
+                            node: el,
+                            attrName: attr.name,
+                            template: attr.value,
+                            placeholders,
+                            keys: uniqueKeys,
+                            isInputValue: attr.name === "value" && el.tagName === "INPUT"
+                        };
+
+                        binding.render = () => {
+                            let rendered = binding.template;
+                            const values = binding.placeholders.map(({ token, key }) => {
+                                const raw = itemData[key];
+                                const value = raw == null ? "" : raw;
+                                rendered = rendered.split(token).join(value);
+                                return raw;
+                            });
+
+                            if (binding.attrName === "style") {
+                                const hasValue = values.some(val => val != null && String(val).trim() !== "");
+                                if (hasValue) {
+                                    binding.node.setAttribute(binding.attrName, rendered.trim());
+                                } else {
+                                    binding.node.removeAttribute(binding.attrName);
                                 }
-
-                                // lưu lại binding (để update khi model đổi)
-                                bindings.push({ key, node: el, type: "attr", attrName: attr.name });
                             } else {
-                                el.removeAttribute(attr.name);
+                                binding.node.setAttribute(binding.attrName, rendered);
                             }
+
+                            if (binding.isInputValue && binding.keys.length === 1) {
+                                const key = binding.keys[0];
+                                const current = itemData[key];
+                                binding.node.value = current == null ? "" : current;
+                            }
+                        };
+
+                        binding.render();
+
+                        if (binding.isInputValue && binding.keys.length === 1) {
+                            const key = binding.keys[0];
+                            el.addEventListener("input", () => {
+                                itemData[key] = el.value;
+                            });
                         }
-                    }
+
+                        bindings.push(binding);
+                    });
                 });
 
                 // 3️⃣ Khi model thay đổi → update view
@@ -1106,13 +1120,20 @@
                     itemData.registerListener(e => {
                         const { field, newValue } = e;
                         bindings.forEach(b => {
-                            if (b.key === field) {
-                                if (b.type === "text") {
-                                    b.node.textContent = newValue; // update text node
-                                } else if (b.type === "attr") {
-                                    b.node.setAttribute(b.attrName, newValue);
+                            const matchesField = Array.isArray(b.keys)
+                                ? b.keys.includes(field)
+                                : b.key === field;
+                            if (!matchesField) return;
+
+                            if (b.type === "text") {
+                                b.node.textContent = newValue == null ? "" : newValue; // update text node
+                            } else if (b.type === "attr") {
+                                if (typeof b.render === "function") {
+                                    b.render();
+                                } else {
+                                    b.node.setAttribute(b.attrName, newValue == null ? "" : newValue);
                                     if (b.attrName === "value" && b.node.tagName === "INPUT") {
-                                        b.node.value = newValue; // model → view
+                                        b.node.value = newValue == null ? "" : newValue; // model → view
                                     }
                                 }
                             }
