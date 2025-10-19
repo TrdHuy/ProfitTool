@@ -304,6 +304,8 @@
             <auto-scroll-input type="text" id="formulaGroup" placeholder="Ví dụ: doanh thu"></auto-scroll-input>
             <label>Công thức:</label>
             <auto-scroll-input type="text" id="formulaInput" placeholder="Ví dụ: A + B * 2"></auto-scroll-input>
+            <label>Format:</label>
+            <select id="formulaFormat"></select>
             <button onclick="addFormula()" id="addFormulaButton">Thêm công thức</button>
             <param-list id="formulasView" onitemclick="handleItemClick" onitemcontextmenu="handleContextMenu('formula')"
                 ongrouptoggle="handleGroupToggle">
@@ -312,7 +314,7 @@
                         <div style="display: block;">
                             <span>{{name}}</span>:
                             <span>{{display}}</span> =
-                            <formatted-input value="{{result}}" readonly></formatted-input>
+                            <formatted-input value="{{result}}" format="{{format}}" readonly></formatted-input>
                             <div style="font-size:12px; color:#666;">{{desc}}</div>
                         </div>
                     </div>
@@ -1460,9 +1462,11 @@
             if (!raw || typeof raw !== "object") return [];
             return Object.entries(raw).map(([name, value]) => {
                 if (value && typeof value === "object" && !Array.isArray(value)) {
-                    return { name, ...value };
+                    const normalized = { name, ...value };
+                    normalized.format = typeof normalized.format === "string" ? normalized.format : "";
+                    return normalized;
                 }
-                return { name, raw: value, display: value };
+                return { name, raw: value, display: value, format: "" };
             });
         }
 
@@ -1806,6 +1810,7 @@
                 document.getElementById("formulaGroup").value = p.groupName;
             }
             document.getElementById("formulaInput").value = p.raw;
+            document.getElementById("formulaFormat").value = p.format || "";
             document.getElementById("addFormulaButton").innerHTML = "Cập nhật";
             editingFormulaKey = key; // đánh dấu đang edit
         }
@@ -1822,6 +1827,7 @@
             const formula = document.getElementById("formulaInput").value.trim();
             const desc = document.getElementById("formulaDesc").value.trim();
             const group = document.getElementById("formulaGroup").value.trim();
+            const format = document.getElementById("formulaFormat").value || "";
 
             if (!formula) { alert("Chưa nhập công thức!"); return; }
 
@@ -1835,6 +1841,7 @@
                 oldItem.raw = formula;
                 oldItem.desc = desc;
                 oldItem.display = formula;
+                oldItem.format = format;
                 editingFormulaKey = null;
                 if (group != '' && group != oldGroupName) {
                     if (oldItem.parent) {
@@ -1851,7 +1858,8 @@
                     raw: formula,
                     desc: desc,
                     display: formula,
-                    result: "1"
+                    result: "1",
+                    format
                 });
 
                 observableListFormulas.addToGroup(group, newItem);
@@ -1863,6 +1871,7 @@
             document.getElementById("formulaInput").value = "";
             document.getElementById("formulaDesc").value = "";
             document.getElementById("formulaGroup").value = "";
+            document.getElementById("formulaFormat").value = "";
 
             persistWorkspace();
         }
@@ -1956,6 +1965,7 @@
             document.getElementById("addParamButton").innerHTML = "Thêm tham số";
             editingFormulaKey = null;
             document.getElementById("addFormulaButton").innerHTML = "Thêm công thức";
+            document.getElementById("formulaFormat").value = "";
             updateFormulaResults();
             persistWorkspace();
         }
