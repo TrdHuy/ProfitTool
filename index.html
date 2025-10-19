@@ -966,6 +966,23 @@
                 const elem = container.firstElementChild;
                 elem.classList.add(C.item);
 
+                const applyBackground = (color) => {
+                    const resolved = color && typeof color === "string" && color.trim() !== ""
+                        ? color
+                        : "#fafafa";
+                    elem.style.setProperty("--list-item-bg", resolved);
+                };
+                applyBackground(itemData.color);
+
+                if (typeof itemData.registerListener === "function") {
+                    const onColorChanged = ({ field, newValue }) => {
+                        if (field === "color") {
+                            applyBackground(newValue);
+                        }
+                    };
+                    itemData.registerListener(onColorChanged);
+                }
+
                 this._attachDragDrop(elem, itemData);
                 this._attachItemEvents(elem, itemData);
                 return elem;
@@ -1700,7 +1717,7 @@
             if (p.groupName) {
                 document.getElementById("paramGroup").value = p.groupName;
             }
-            document.getElementById("paramColor").value = p.color;
+            document.getElementById("paramColor").value = p.color || "#f0f0f0";
             document.getElementById("paramDesc").value = p.desc || "";
             document.getElementById("paramFormat").value = p.format;
             document.getElementById("addParamButton").innerHTML = "Cập nhật";
@@ -1730,6 +1747,7 @@
                 oldItem.value = value;
                 oldItem.desc = desc;
                 oldItem.format = format;
+                oldItem.color = color;
                 editingParamKey = null;
                 if (group != '' && group != oldGroupName) {
                     if (oldItem.parent) {
